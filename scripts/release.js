@@ -11,7 +11,8 @@
  *   perf: ……      效能     → 修訂號 +1
  *   feat!: ……     破壞性變更 → 1.0 之後主版號 +1（1.0 之前視為次版號）
  *   docs/test/chore/ci/refactor/style 不會觸發發佈。
- * 冒號後面的文字會原樣寫進更新紀錄，請寫玩家看得懂的話。 */
+ * 冒號後面的文字會原樣寫進更新紀錄，請寫玩家看得懂的話。
+ * 一個 commit 做了好幾件事時，在內文另起一行、同樣用「feat: ……」「fix: ……」開頭，每一行都會各自列進更新紀錄。 */
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -50,11 +51,14 @@ function analyze(commits, current) {
   const groups = {};
   let level = 0; // 0 不發佈、1 修訂、2 次版、3 主版
   commits.forEach((c) => {
-    const m = /^(\w+)(?:\([^)]*\))?(!)?:\s*(.+)$/.exec(c.subject);
-    if (!m || !SECTIONS[m[1]]) return;
-    const breaking = !!m[2] || /BREAKING CHANGE/.test(c.body || '');
-    level = Math.max(level, breaking ? 3 : m[1] === 'feat' ? 2 : 1);
-    (groups[m[1]] = groups[m[1]] || []).push(m[3].trim());
+    const lines = [c.subject].concat((c.body || '').split('\n').map((x) => x.trim()));
+    lines.forEach((line, i) => {
+      const m = /^(\w+)(?:\([^)]*\))?(!)?:\s*(.+)$/.exec(line);
+      if (!m || !SECTIONS[m[1]]) return;
+      const breaking = !!m[2] || (i === 0 && /BREAKING CHANGE/.test(c.body || ''));
+      level = Math.max(level, breaking ? 3 : m[1] === 'feat' ? 2 : 1);
+      (groups[m[1]] = groups[m[1]] || []).push(m[3].trim());
+    });
   });
   if (!level) return null;
   const v = current.split('.').map(Number);

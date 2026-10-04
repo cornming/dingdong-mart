@@ -1,12 +1,17 @@
 /* 叮咚！便利店 — 介面（DOM）。所有遊戲規則都在 engine.js，這裡只負責顯示與操作。 */
 (function (root) {
   'use strict';
-  const D = root.DD_DATA, E = root.DD, SC = root.DD_SCENE, AU = root.DD_AUDIO;
+  const D = root.DD_DATA, E = root.DD, C = root.DD_CHAIN, SC = root.DD_SCENE, AU = root.DD_AUDIO;
   const VER = root.DD_VERSION || { version: 'dev', changelog: [] };
   const SAVE_KEY = 'dingdong-mart-save-v1';
   const PREF_KEY = 'dingdong-mart-pref-v1';
-  const SPEED_MS = { 1: 1500, 2: 500, 3: 190 };
-  const SPEED_MULT = { 1: 1, 2: 3, 3: 8 };
+  const SPEED_MS = { 1: 1500, 2: 500 };
+  const SPEED_MULT = { 1: 1, 2: 3 };
+  const HALL_MAX = 10;
+  // 搜尋商品時也比對得到的同義詞
+  const KEYWORDS = { snack: '零食 餅乾 點心', noodle: '杯麵 速食麵 零食', daily: '日用品 面紙', umbrella: '雨具 日用品', candy: '糖果 零食', pen: '筆 日用品',
+    tea: '飲料 茶 綠茶', soda: '飲料 可樂 氣泡', milk: '飲料 牛奶 乳品', beer: '飲料 酒', onigiri: '飯糰 鮮食', bento: '飯 餐盒 鮮食', sandwich: '麵包 鮮食',
+    egg: '熱食 蛋', oden: '熱食 黑輪', hotdog: '熱食 熱狗', popsicle: '冰品 冰', dumpling: '冷凍 餃子', paper: '書報', comic: '書報 雜誌', coffee: '飲料 咖啡', slush: '飲料 冰品' };
   const MEDALS = ['未達標', '銅牌店長', '銀牌店長', '金牌店長'];
   const WX_CH = { sunny: '晴', cloudy: '陰', rainy: '雨', hot: '暑', cold: '寒', typhoon: '颱' };
   const TABS = [['stock', '進貨'], ['equip', '設備'], ['staff', '店員'], ['promo', '宣傳'], ['report', '報表']];
@@ -20,24 +25,31 @@
   function pad2(n) { return (n < 10 ? '0' : '') + n; }
   function signed(n) { return (n < 0 ? '−' : '+') + money(Math.abs(n)); }
 
-  let S = null;
+  let CH = null;   // 連鎖：一家或多家店共用一個錢包
+  let S = null;    // 目前正在看的那家店（CH.stores[CH.active]）
   let scene = null;
   const ui = { screen: 'title', speed: 1, paused: true, sheet: null, slotSel: null, modal: null, acc: 0, last: 0,
-    cityId: null, locId: null, tick: '', closedNote: -1, toastTimer: null, hours: [] };
-  const pref = { sfx: true, music: true, tutorial: false, best: {} };
+    cityId: null, locId: null, tick: '', closedNote: -1, toastTimer: null, hoursBy: {}, stockQ: '', stockCat: 'all',
+    lastBg: [], milestone: false, branchMode: false };
+  const pref = { sfx: true, music: true, tutorial: false, best: {}, hall: [] };
+  function hoursOf() { return (CH && ui.hoursBy[CH.active]) || []; }
 
   /* ---------- 存檔 ---------- */
   function store(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); return true; } catch (e) { return false; } }
   function fetchStored(key) { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : null; } catch (e) { return null; } }
-  function save() { return S && !S.over ? store(SAVE_KEY, { state: S, speed: ui.speed, hours: ui.hours, at: Date.now() }) : false; }
+  function save() { return CH && !C.over(CH) && !CH.retired ? store(SAVE_KEY, { chain: CH, speed: ui.speed, hours: ui.hoursBy, at: Date.now() }) : false; }
+  /** 讀檔。舊版（只有一家店）的存檔會自動轉成連鎖格式。 */
   function loadSave() {
     const sv = fetchStored(SAVE_KEY);
-    return sv && sv.state && sv.state.v === 1 && E.LOC[sv.state.locId] ? sv : null;
+    const ch = C.fromSave(sv);
+    if (!ch) return null;
+    const hours = Array.isArray(sv.hours) ? { 0: sv.hours } : (sv.hours && typeof sv.hours === 'object' ? sv.hours : {});
+    return { chain: ch, speed: sv.speed === 1 || sv.speed === 2 ? sv.speed : 1, hours: hours };
   }
   function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* 沒有儲存空間就算了 */ } }
   (function () {
     const p = fetchStored(PREF_KEY);
-    if (p) { pref.sfx = p.sfx !== false; pref.music = p.music !== false; pref.tutorial = !!p.tutorial; pref.best = p.best && typeof p.best === 'object' ? p.best : {}; }
+    if (p) { pref.sfx = p.sfx !== false; pref.music = p.music !== false; pref.tutorial = !!p.tutorial; pref.best = p.best && typeof p.best === 'object' ? p.best : {}; pref.hall = Array.isArray(p.hall) ? p.hall.slice(0, HALL_MAX) : []; }
     AU.setSfx(pref.sfx); AU.setMusic(pref.music);
   })();
   function savePref() { store(PREF_KEY, pref); }
@@ -77,9 +89,9 @@
         '<canvas id="titleCanvas" aria-label="夜裡亮著燈的便利店"></canvas>' +
         '<p class="tagline">一九九九年的夏天，你頂下了巷口的一間小店。<br>進貨、排班、對付奧客，把它變成整條街最亮的招牌。</p>' +
         '<div class="title-btns">' +
-          (sv ? '<button class="btn big primary" data-act="continue">繼續經營<small>' + esc(sv.state.name) + '・第 ' + sv.state.day + ' 天</small></button>' : '') +
+          (sv ? '<button class="btn big primary" data-act="continue">繼續經營<small>' + esc(sv.chain.stores[0].name) + (sv.chain.stores.length > 1 ? ' 等 ' + sv.chain.stores.length + ' 家店' : '') + '・第 ' + sv.chain.stores[0].day + ' 天</small></button>' : '') +
           '<button class="btn big' + (sv ? '' : ' primary') + '" data-act="new">開一家新店</button>' +
-          '<div class="title-row"><button class="btn" data-act="howto">怎麼玩</button><button class="btn" data-act="changelog">更新紀錄</button></div>' +
+          '<div class="title-row three"><button class="btn" data-act="howto">怎麼玩</button><button class="btn" data-act="hall">名人堂</button><button class="btn" data-act="changelog">更新紀錄</button></div>' +
         '</div>' +
         '<p class="title-foot"><button class="link" data-act="toggleMusic">音樂：' + (pref.music ? '開' : '關') + '</button>' +
           '<button class="link" data-act="toggleSfx">音效：' + (pref.sfx ? '開' : '關') + '</button><span>v' + esc(VER.version) + '</span></p>' +
@@ -89,26 +101,30 @@
   /* ---------- 選城市與地點 ---------- */
   function renderCity() {
     ui.screen = 'city';
-    let html = '<div class="pick"><div class="win"><div class="awning"></div><h2>要在哪個城市開店？</h2><div class="win-body">';
+    const br = ui.branchMode;
+    let html = '<div class="pick"><div class="win"><div class="awning"></div><h2>' + (br ? '分店要開在哪個城市？' : '要在哪個城市開店？') + '</h2><div class="win-body">';
     D.CITY_ORDER.forEach(function (id) {
       const c = D.CITIES[id];
       html += '<button class="city" data-act="city" data-id="' + id + '"><b>' + c.name + '</b><span class="tag lv-' + id + '">' + c.level + '</span>' +
-        '<p>' + c.blurb + '</p><small>創業資金 ' + money(c.cash) + '・' + c.days + ' 天內總資產達 ' + money(c.goals[0]) + ' 得銅牌</small></button>';
+        '<p>' + c.blurb + '</p><small>' + (br ? '頂下一間店 ' + money(C.BRANCH_COST[id]) + '・含基本設備與第一批貨' : '創業資金 ' + money(c.cash) + '・' + c.days + ' 天內總資產達 ' + money(c.goals[0]) + ' 得銅牌') + '</small></button>';
     });
-    html += '</div><div class="win-foot"><button class="btn" data-act="title">回標題</button></div></div></div>';
+    html += '</div><div class="win-foot">' + (br ? '<span class="sub">現金 ' + money(C.wallet(CH)) + '</span><button class="btn" data-act="backToGame">回店裡</button>' : '<button class="btn" data-act="title">回標題</button>') + '</div></div></div>' +
+      '<div class="modal-wrap" id="modal" hidden></div><div class="toast" id="toast"></div>';
     app.innerHTML = html;
   }
   function trafficWord(n) { return n >= 2800 ? '非常多' : n >= 2200 ? '多' : n >= 1700 ? '普通' : '偏少'; }
   function renderLoc() {
     ui.screen = 'loc';
     const city = D.CITIES[ui.cityId];
+    const br = ui.branchMode;
+    const mine = function (id) { return br && C.owns(CH, id); };
     const locs = D.LOCATIONS.filter(function (l) { return l.city === ui.cityId; });
-    if (!ui.locId || E.LOC[ui.locId].city !== ui.cityId) ui.locId = locs[0].id;
+    if (!ui.locId || E.LOC[ui.locId].city !== ui.cityId) ui.locId = (locs.filter(function (l) { return !mine(l.id); })[0] || locs[0]).id;
     const loc = E.LOC[ui.locId];
     let pins = '';
     locs.forEach(function (l) {
       const best = pref.best[l.id] | 0;
-      pins += '<button class="pin' + (l.id === ui.locId ? ' on' : '') + (best ? ' won' : '') + '" style="left:' + l.x + '%;top:' + l.y + '%" data-act="loc" data-id="' + l.id + '"><i></i><span>' + l.name + (best ? '・' + ['', '銅', '銀', '金'][best] : '') + '</span></button>';
+      pins += '<button class="pin' + (l.id === ui.locId ? ' on' : '') + (best ? ' won' : '') + (mine(l.id) ? ' own' : '') + '" style="left:' + l.x + '%;top:' + l.y + '%" data-act="loc" data-id="' + l.id + '"><i></i><span>' + l.name + (mine(l.id) ? '・你的店' : best ? '・' + ['', '銅', '銀', '金'][best] : '') + '</span></button>';
     });
     let mix = '';
     Object.keys(D.SEGMENTS).forEach(function (k) {
@@ -117,7 +133,8 @@
     });
     const rivals = loc.rivals.length ? loc.rivals.map(function (r) { return r.name; }).join('、') : '目前沒有';
     const old = $('#storeName');
-    const nameVal = old ? old.value : (ui.nameDraft || '叮咚便利店');
+    const nameVal = old ? old.value : (ui.nameDraft || (br ? (CH.stores[0].name.slice(0, 6) + ['', '二店', '三店', '四店'][CH.stores.length]) : '叮咚便利店'));
+    const can = br ? C.canBranch(CH, ui.locId) : null;
     app.innerHTML =
       '<div class="pick"><div class="win"><div class="awning"></div><h2>' + city.name + '・挑一個店面</h2><div class="win-body">' +
         '<div class="map map-' + ui.cityId + '">' + pins + '</div>' +
@@ -128,7 +145,9 @@
           '<div class="advice"><img class="mascot" alt="" src="' + SC.mascot() + '"><p>' + loc.tip + '</p></div>' +
         '</div>' +
         '<label class="namefield">店名<input id="storeName" maxlength="8" value="' + esc(nameVal) + '" autocomplete="off"></label>' +
-      '</div><div class="win-foot"><button class="btn" data-act="new">換城市</button><button class="btn primary" data-act="start">就開在這裡</button></div></div></div>' +
+      '</div><div class="win-foot">' + (br
+        ? (can.ok ? '' : '<span class="sub bad">' + esc(can.msg) + '</span>') + '<button class="btn" data-act="branch">換城市</button><button class="btn' + (can.ok ? ' primary' : ' off') + '" data-act="branchStart">頂下來 ' + money(C.branchCost(ui.locId)) + '</button>'
+        : '<button class="btn" data-act="new">換城市</button><button class="btn primary" data-act="start">就開在這裡</button>') + '</div></div></div>' +
       '<div class="modal-wrap" id="modal" hidden></div><div class="toast" id="toast"></div>';
   }
 
@@ -143,13 +162,14 @@
           '<div class="hud-row"><div class="hud-date"><b id="hDay"></b><span id="hClock" class="clock"></span></div>' +
             '<div class="hud-wx" id="hWx"></div><button class="icon-btn" data-act="menu">選單</button></div>' +
           '<div class="hud-row"><div class="lcd" id="hCash"></div><div class="hud-rep">口碑<b id="hRep"></b></div>' +
-            '<button class="hud-goal" data-act="tab" data-tab="report"><span id="hGoalTxt"></span><span class="meter gold"><i id="hGoalBar"></i></span></button></div>' +
+            '<button class="hud-goal" data-act="goal"><span id="hGoalTxt"></span><span class="meter gold"><i id="hGoalBar"></i></span></button></div>' +
         '</header>' +
+        '<div class="stores" id="stores" hidden></div>' +
         '<div class="stage" id="stage"><canvas id="scene" aria-label="店面"></canvas></div>' +
         '<button class="dayline" id="dayline" data-act="tab" data-tab="staff" aria-label="今天每小時的來客數與三個班的人手，點一下去排班"></button>' +
         '<div class="advisor"><img class="mascot" alt="顧問咚咚" src="' + SC.mascot() + '"><p id="tick" aria-live="polite"></p></div>' +
         '<div class="controls"><div class="speed" role="group" aria-label="遊戲速度">' +
-          '<button data-act="speed" data-v="0">暫停</button><button data-act="speed" data-v="1">×1</button><button data-act="speed" data-v="2">×3</button><button data-act="speed" data-v="3">×8</button></div>' +
+          '<button data-act="speed" data-v="0">暫停</button><button data-act="speed" data-v="1">×1</button><button data-act="speed" data-v="2">×3</button></div>' +
           '<div class="today" id="today"></div></div>' +
         '<nav class="tabs">' + tabs + '</nav>' +
         '<section class="sheet" id="sheet" hidden></section>' +
@@ -172,17 +192,17 @@
   function updateDayline() {
     const el = $('#dayline');
     if (!el) return;
-    const exp = [];
+    const exp = [], hrs = hoursOf();
     let max = 12;
     for (let t = 0; t < 24; t++) {
       const lam = E.lambdaAt(S, E.clockOf(t));
       exp.push(lam);
-      const rec = ui.hours[t];
+      const rec = hrs[t];
       max = Math.max(max, t < S.t && rec ? rec.n : lam);
     }
     let h = '<span class="dl-bars">';
     for (let t = 0; t < 24; t++) {
-      const past = t < S.t, rec = ui.hours[t];
+      const past = t < S.t, rec = hrs[t];
       const open = past && rec ? rec.open !== false : E.isOpen(S, E.shiftOf(t));
       const v = past && rec ? rec.n : exp[t];
       h += '<i class="' + (past ? 'dl-past' : 'dl-next') + (open ? '' : ' dl-shut') + (t === S.t ? ' dl-now' : '') + '" style="height:' + Math.max(7, Math.round(v / max * 100)) + '%"></i>';
@@ -198,7 +218,10 @@
   function goalInfo() {
     const city = D.CITIES[S.cityId];
     const worth = E.netWorth(S);
-    if (S.medal) return { txt: MEDALS[S.medal.tier] + '・自由經營', pct: 100, worth: worth };
+    if (S.medal) {
+      const w = C.wallet(CH);
+      return { txt: w >= C.GOAL ? '現金破 300 萬！可以退休或開分店' : '距 300 萬 ' + money(C.GOAL - w), pct: w / C.GOAL * 100, worth: worth, chain: true };
+    }
     let tier = 0;
     city.goals.forEach(function (g, i) { if (worth >= g) tier = i + 1; });
     const next = city.goals[Math.min(tier, 2)];
@@ -222,6 +245,18 @@
     const td = S.today;
     $('#today').textContent = '來客 ' + td.customers + '・營收 ' + money(td.rev);
     updateDayline();
+    // 分店列：有兩家店以上，或已經可以開分店時才出現
+    const sb = $('#stores');
+    const show = CH.stores.length > 1 || CH.unlocked;
+    if (sb.hidden === show) { sb.hidden = !show; fitStage(); }
+    if (show) {
+      let sh = '';
+      CH.stores.forEach(function (st, i) {
+        const warn = [0, 1, 2].some(function (k) { return !E.isOpen(st, k); });
+        sh += '<button class="' + (i === CH.active ? 'on' : '') + '" data-act="switchStore" data-i="' + i + '">' + esc(st.name) + (warn ? '<i class="dot" title="有班次沒人顧"></i>' : '') + '</button>';
+      });
+      sb.innerHTML = sh + '<button class="hq" data-act="hq">總部</button>';
+    }
     app.querySelectorAll('.speed button').forEach(function (b) {
       const v = +b.getAttribute('data-v');
       b.classList.toggle('on', ui.paused ? v === 0 : v === ui.speed);
@@ -230,34 +265,98 @@
   }
 
   /* ---------- 分頁：進貨 ---------- */
+  /** 明天清晨這項商品會補幾個、花多少錢（鮮食與報紙打烊就報廢，所以是整批重補）。 */
+  function nextOrder(p) {
+    const cap = E.cap(S, p.id);
+    if (!cap) return { n: 0, cost: 0 };
+    const goal = Math.min(S.target[p.id], cap);
+    const n = p.perish ? goal : Math.max(0, goal - S.stock[p.id]);
+    return { n: n, cost: Math.round(n * E.unitCost(S, p.id)) };
+  }
+  function stockSummary() {
+    let n = 0, cost = 0, kinds = 0;
+    D.PRODUCTS.forEach(function (p) { const o = nextOrder(p); if (o.n) { n += o.n; cost += o.cost; kinds++; } });
+    const left = 24 - Math.min(S.t, 24);
+    return '<div class="truck"><b>下一班貨車：明天清晨 06:00</b><span>還有 ' + left + ' 小時</span></div>' +
+      '<div class="truckbar"><i style="width:' + (Math.min(S.t, 24) / 24 * 100) + '%"></i></div>' +
+      '<p>' + (n ? '照現在的設定，會補 <b>' + kinds + '</b> 種、共 <b>' + n + '</b> 件，約 <b>' + money(cost) + '</b>（以打烊時剩下的量為準）。' : '照現在的設定，明天不用補貨。') + '</p>' +
+      '<p class="sub">「補到」是每天自動補貨的目標量，<b>明早才到</b>。等不及就按<b>立刻到貨</b>：馬上上架，但多收三成運費。明天預報 ' + wxChip(S.forecast, true) + '</p>';
+  }
   function prodRow(p) {
     const cap = E.cap(S, p.id), st = S.stock[p.id], tg = S.target[p.id], pct = S.price[p.id];
     const y = S.lastReport && S.lastReport.perProd[p.id];
     const rush = E.rushCost(S, p.id);
+    const ord = nextOrder(p);
     const pctTxt = pct === 100 ? '原價' : (pct > 100 ? '貴 ' : '便宜 ') + Math.abs(pct - 100) + '%';
     let foot = y ? '昨天 賣 ' + y.sold + (y.soldOut ? '・<b class="bad">' + y.soldOut + ' 人買不到</b>' : '') + (y.waste ? '・<b class="bad">報廢 ' + y.waste + '</b>' : '') + (y.pricey ? '・' + y.pricey + ' 人嫌貴' : '') : '還沒有銷售紀錄';
     if (S.upgrades.pos && S.prodHist.length) foot += '・<b class="good">建議 ' + E.suggest(S, p.id) + '</b>';
     return '<div class="prod" data-pid="' + p.id + '">' +
       '<div class="prod-top">' + chip(p) + '<b>' + p.name + '</b>' + (p.perish ? '<span class="tag warn">當日報廢</span>' : '') + (S.promo[p.id] > 0 ? '<span class="tag good">進貨 7 折</span>' : '') +
-        '<span class="stockn' + (st === 0 ? ' zero' : '') + '">庫存 ' + st + '</span></div>' +
+        '<span class="stockn' + (st === 0 ? ' zero' : '') + '">庫存 ' + st + '／' + tg + '</span></div>' +
+      '<div class="stockbar" aria-hidden="true"><i style="width:' + Math.min(100, st / cap * 100) + '%"></i><u style="left:' + Math.min(100, tg / cap * 100) + '%"></u></div>' +
       '<div class="prod-row"><span class="lbl">售價</span><button class="step" data-act="price" data-d="-5" aria-label="降價">−</button>' +
         '<span class="pv"><b>$' + E.unitPrice(S, p.id) + '</b><small class="' + (pct > 100 ? 'bad' : pct < 100 ? 'good' : '') + '">' + pctTxt + '</small></span>' +
         '<button class="step" data-act="price" data-d="5" aria-label="漲價">＋</button><span class="cost">成本 $' + E.unitCost(S, p.id) + '</span></div>' +
       '<div class="prod-row"><span class="lbl">補到</span><input type="range" min="0" max="' + cap + '" step="10" value="' + tg + '" data-act="target" aria-label="' + p.name + '進貨目標"><output>' + tg + '</output></div>' +
-      '<div class="prod-foot"><span>' + foot + '</span>' + (rush ? '<button class="btn sm" data-act="rush">馬上補 ' + money(rush) + '</button>' : '') + '</div></div>';
+      '<div class="prod-eta"><span>' + (ord.n ? '明早 06:00 到貨 <b>+' + ord.n + '</b>（約 ' + money(ord.cost) + '）' : '明早不用補') + '</span>' +
+        (rush ? '<button class="btn sm" data-act="rush">立刻到貨 +' + (Math.min(tg, cap) - st) + '・' + money(rush) + '</button>' : '') + '</div>' +
+      '<div class="prod-foot"><span>' + foot + '</span></div></div>';
+  }
+  /* 模糊搜尋：直接包含最優先；否則只要每個字依序出現就算符合（打「茶蛋」找得到「茶葉蛋」）。 */
+  function fuzzy(q, text) {
+    q = q.replace(/\s+/g, '').toLowerCase();
+    if (!q) return true;
+    text = text.toLowerCase();
+    if (text.indexOf(q) >= 0) return true;
+    let i = 0;
+    for (let k = 0; k < text.length && i < q.length; k++) if (text[k] === q[i]) i++;
+    return i === q.length;
+  }
+  function stockMatch(p) {
+    const cat = ui.stockCat;
+    if (cat === 'out' && S.stock[p.id] > 0) return false;
+    if (cat === 'low' && !(E.rushCost(S, p.id) > 0)) return false;
+    if (cat.indexOf('fx:') === 0 && p.fx !== cat.slice(3)) return false;
+    return fuzzy(ui.stockQ, p.name + ' ' + D.FIXTURES[p.fx].name + ' ' + (KEYWORDS[p.id] || ''));
+  }
+  /** 依搜尋字與分類，就地顯示或隱藏商品列（不重畫，輸入框才不會失去焦點）。 */
+  function applyStockFilter() {
+    const body = $('#sheet .sheet-body');
+    if (!body || ui.sheet !== 'stock') return;
+    let shown = 0;
+    body.querySelectorAll('.prod').forEach(function (row) {
+      const ok = stockMatch(E.P[row.getAttribute('data-pid')]);
+      row.hidden = !ok;
+      if (ok) shown++;
+    });
+    body.querySelectorAll('.grp[data-fx]').forEach(function (g) {
+      const fx = g.getAttribute('data-fx');
+      g.hidden = !D.PRODUCTS.some(function (p) { return p.fx === fx && E.cap(S, p.id) > 0 && stockMatch(p); });
+    });
+    const filtering = !!ui.stockQ.trim() || ui.stockCat !== 'all';
+    body.querySelectorAll('.unsold').forEach(function (el) { el.hidden = filtering; });
+    const none = $('#stockNone');
+    if (none) none.hidden = shown > 0;
+    body.querySelectorAll('.cats button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-k') === ui.stockCat); });
   }
   function sheetStock() {
-    let html = '<p class="note">這裡設定的數量，會在<b>明天清晨</b>補滿到貨架上。明天預報 ' + wxChip(S.forecast, true) + '</p>';
+    if (ui.stockCat.indexOf('fx:') === 0 && !E.fixtureCount(S, ui.stockCat.slice(3))) ui.stockCat = 'all';
+    let html = '<div class="card ship" id="stockSum">' + stockSummary() + '</div>';
+    html += '<input class="search" id="stockQ" type="search" inputmode="search" enterkeyhint="search" autocomplete="off" placeholder="搜尋商品，例如：茶、飲料、鮮食" aria-label="搜尋商品" data-act="stockSearch" value="' + esc(ui.stockQ) + '">';
+    let cats = '<div class="cats" role="group" aria-label="商品分類"><button data-act="stockCat" data-k="all">全部</button><button data-act="stockCat" data-k="out">賣完了</button><button data-act="stockCat" data-k="low">沒補滿</button>';
+    D.FIXTURE_ORDER.forEach(function (fx) { if (E.fixtureCount(S, fx)) cats += '<button data-act="stockCat" data-k="fx:' + fx + '">' + D.FIXTURES[fx].name + '</button>'; });
+    html += cats + '</div>';
     if (S.upgrades.pos) html += '<button class="btn wide" data-act="applySuggest">一鍵套用 POS 建議進貨量</button>';
+    html += '<p class="sub center" id="stockNone" hidden>找不到符合的商品。換個字，或按「全部」。</p>';
     const locked = [];
     D.FIXTURE_ORDER.forEach(function (fx) {
       const n = E.fixtureCount(S, fx);
       if (!n) { locked.push(fx); return; }
-      html += '<h3 class="grp">' + D.FIXTURES[fx].name + ' ×' + n + '<small>每種最多 ' + D.FIXTURES[fx].cap * n + '</small></h3>';
+      html += '<h3 class="grp" data-fx="' + fx + '">' + D.FIXTURES[fx].name + ' ×' + n + '<small>每種最多 ' + D.FIXTURES[fx].cap * n + '</small></h3>';
       D.PRODUCTS.forEach(function (p) { if (p.fx === fx) html += prodRow(p); });
     });
     if (locked.length) {
-      html += '<h3 class="grp">還不能賣的商品</h3>';
+      html += '<div class="unsold"><h3 class="grp">還不能賣的商品</h3>';
       locked.forEach(function (fx) {
         let chips = '', miss = 0;
         D.PRODUCTS.forEach(function (p) {
@@ -268,7 +367,7 @@
         });
         html += '<div class="lockrow"><div>' + chips + '</div><small>需要「' + D.FIXTURES[fx].name + '」' + (miss ? '・昨天有 <b class="bad">' + miss + '</b> 人次想買' : '') + '</small></div>';
       });
-      html += '<button class="btn wide" data-act="tab" data-tab="equip">去買設備</button>';
+      html += '<button class="btn wide" data-act="tab" data-tab="equip">去買設備</button></div>';
     }
     return html;
   }
@@ -353,7 +452,9 @@
       html += '<div class="shift' + (crew.length ? '' : ' empty') + '"><b>' + sh.name + '</b><small>' + sh.range + '</small><span>' + (names.length ? names.join('、') : '沒人顧店') + '</span>' +
         '<em>' + (crew.length ? '每小時可結帳 ' + Math.round(capa) + ' 人' : '這段時間不營業') + '</em></div>';
     });
-    html += '</div><h3 class="grp">店長（你）<small>不用薪水</small></h3><div class="card">' + shiftButtons('ownerShift', S.owner.shift, null, true) + '</div>';
+    html += '</div>';
+    if (S.branch) html += '<p class="note">你人在總店，這家分店沒有店長站櫃台，<b>三個班都要請人</b>。</p>';
+    else html += '<h3 class="grp">店長（你）<small>不用薪水</small></h3><div class="card">' + shiftButtons('ownerShift', S.owner.shift, null, true) + '</div>';
     html += '<h3 class="grp">店員 ' + S.staff.length + '／6</h3>';
     if (!S.staff.length) html += '<div class="card"><p>目前沒有店員。從下面的應徵者挑一位吧。</p></div>';
     S.staff.forEach(function (m) {
@@ -416,12 +517,17 @@
   function sheetReport() {
     const city = D.CITIES[S.cityId];
     const g = goalInfo();
-    let html = '<div class="card"><h4>目標：' + city.days + ' 天結束時的總資產</h4>';
-    ['銅牌', '銀牌', '金牌'].forEach(function (nm, i) {
-      html += '<div class="goalrow' + (g.worth >= city.goals[i] ? ' hit' : '') + '"><span>' + nm + '</span>' + bar(g.worth, city.goals[i], 'gold') + '<b>' + money(city.goals[i]) + '</b></div>';
-    });
-    html += '<p class="sub">目前總資產 <b>' + money(g.worth) + '</b>（現金 ' + money(S.cash) + '＋庫存 ' + money(E.inventoryValue(S)) + '＋設備半價）' +
-      (S.medal ? '・已取得「' + MEDALS[S.medal.tier] + '」' : '・還剩 ' + g.left + ' 天') + '</p></div>';
+    let html = '<div class="card"><h4>終極目標：現金 ' + money(C.GOAL) + '</h4><div class="goalrow' + (C.wallet(CH) >= C.GOAL ? ' hit' : '') + '"><span>現金</span>' + bar(C.wallet(CH), C.GOAL, 'gold') + '<b>' + money(C.wallet(CH)) + '</b></div>' +
+      '<p class="sub">存到之後可以光榮退休（破關、進名人堂），或頂下一間分店繼續挑戰。經營 ' + (CH.stores[0].day - 1) + ' 天・累計營收 ' + money(CH.totalRev) + '</p>' +
+      '<button class="btn wide" data-act="hq">總部' + (CH.stores.length > 1 ? '（' + CH.stores.length + ' 家店）' : '') + '</button></div>';
+    if (!S.branch) {
+      html += '<div class="card"><h4>' + city.days + ' 天評比：總資產</h4>';
+      ['銅牌', '銀牌', '金牌'].forEach(function (nm, i) {
+        html += '<div class="goalrow' + (g.worth >= city.goals[i] ? ' hit' : '') + '"><span>' + nm + '</span>' + bar(g.worth, city.goals[i], 'gold') + '<b>' + money(city.goals[i]) + '</b></div>';
+      });
+      html += '<p class="sub">這家店的總資產 <b>' + money(g.worth) + '</b>（現金 ' + money(S.cash) + '＋庫存 ' + money(E.inventoryValue(S)) + '＋設備半價）' +
+        (S.medal ? '・已取得「' + MEDALS[S.medal.tier] + '」' : '・還剩 ' + g.left + ' 天') + '</p></div>';
+    }
     const td = S.today;
     html += '<div class="card"><h4>今天到目前為止</h4><div class="kv"><span>來客</span><b>' + td.customers + '</b><span>營收</span><b>' + money(td.rev) + '</b>' +
       '<span>滿意</span><b class="good">' + td.happy + '</b><span>不滿意</span><b class="bad">' + td.unhappy + '</b>' +
@@ -442,6 +548,7 @@
     el.hidden = false;
     el.innerHTML = '<div class="awning"></div><div class="sheet-head"><h2>' + title + '</h2><span class="lcd sm">' + money(S.cash) + '</span><button class="btn sm" data-act="closeSheet">回店面</button></div>' +
       '<div class="sheet-body">' + SHEETS[ui.sheet]() + '</div>';
+    applyStockFilter();
     el.querySelector('.sheet-body').scrollTop = top;
     updateHud();
   }
@@ -472,11 +579,24 @@
     const total = Math.max(1, r.customers);
     let tips = '';
     r.tips.forEach(function (t) { tips += '<li>' + esc(t) + '</li>'; });
-    const h = '<h2>第 ' + r.day + ' 天結算<span class="stamp ' + (r.profit >= 0 ? 'win' : 'lose') + '">' + (r.profit >= 0 ? '賺' : '賠') + '</span></h2><div class="win-body">' +
+    let others = '';
+    if (ui.lastBg.length) {
+      let sum = r.profit;
+      others = '<table class="pnl others"><tr><td>' + esc(S.name) + '（上面這張）</td><td>' + signed(r.profit) + '</td></tr>';
+      ui.lastBg.forEach(function (b) {
+        const br = b.res && b.res.report;
+        if (!br) return;
+        sum += br.profit;
+        others += '<tr><td>' + esc(CH.stores[b.i].name) + '</td><td class="' + (br.profit < 0 ? 'bad' : '') + '">' + signed(br.profit) + '</td></tr>';
+      });
+      others += '<tr class="total"><td>全部的店</td><td class="' + (sum < 0 ? 'bad' : 'good') + '">' + signed(sum) + '</td></tr></table>';
+    }
+    const h = '<h2>' + (CH.stores.length > 1 ? esc(S.name) + '・' : '') + '第 ' + r.day + ' 天結算<span class="stamp ' + (r.profit >= 0 ? 'win' : 'lose') + '">' + (r.profit >= 0 ? '賺' : '賠') + '</span></h2><div class="win-body">' +
       pnl(r) +
       '<div class="kv"><span>來客</span><b>' + r.customers + ' 人</b><span>滿意／不滿</span><b>' + Math.round(r.happy / total * 100) + '%／' + Math.round(r.unhappy / total * 100) + '%</b>' +
       '<span>口碑</span><b>' + r.rep + '</b><span>市佔率</span><b>' + Math.round(r.share * 100) + '%</b>' +
-      '<span>今早進貨</span><b>' + money(r.orderCost) + '</b><span>總資產</span><b>' + money(r.worth) + '</b></div>' +
+      '<span>清晨到貨</span><b>' + money(r.orderCost) + '</b><span>現金</span><b>' + money(C.wallet(CH)) + '</b></div>' +
+      others +
       '<div class="advice"><img class="mascot" alt="" src="' + SC.mascot() + '"><ul>' + tips + '</ul></div>' +
       '<p class="sub">今天 ' + wxChip(S.weather, true) + '　明天預報 ' + wxChip(S.forecast, true) + (S.medal ? '' : '　' + g.txt) + '</p>' +
       '</div><div class="win-foot"><button class="btn primary" data-act="nextDay">開始第 ' + S.day + ' 天</button></div>';
@@ -495,8 +615,52 @@
   function showBankrupt() {
     AU.bad();
     clearSave();
-    openModal('<h2>倒閉了……</h2><div class="win-body center"><p class="story">透支超過 ' + money(-E.OVERDRAFT) + '，銀行把店收走了。<br>你在鐵門上貼了一張紙：「感謝街坊 ' + (S.day - 1) + ' 天來的照顧。」</p></div>' +
+    openModal('<h2>倒閉了……</h2><div class="win-body center"><p class="story">透支超過 ' + money(-E.OVERDRAFT) + '，銀行把' + (CH.stores.length > 1 ? '所有的店都' : '店') + '收走了。<br>你在鐵門上貼了一張紙：「感謝街坊 ' + (S.day - 1) + ' 天來的照顧。」</p></div>' +
       '<div class="win-foot"><button class="btn primary" data-act="quit">回標題重新來過</button></div>', 'result');
+  }
+  /* ---------- 總部：分店、里程碑、退休、名人堂 ---------- */
+  function showHQ() {
+    const w = C.wallet(CH);
+    let h = '<h2>總部</h2><div class="win-body">' +
+      '<div class="goalrow' + (w >= C.GOAL ? ' hit' : '') + '"><span>現金</span>' + bar(w, C.GOAL, 'gold') + '<b>' + money(w) + '</b></div>' +
+      '<div class="kv"><span>目標</span><b>' + money(C.GOAL) + '</b><span>經營天數</span><b>' + (CH.stores[0].day - 1) + ' 天</b>' +
+      '<span>累計營收</span><b>' + money(CH.totalRev) + '</b><span>總資產</span><b>' + money(C.netWorth(CH)) + '</b></div>';
+    CH.stores.forEach(function (st, i) {
+      const y = st.lastReport;
+      const gaps = [0, 1, 2].filter(function (k) { return !E.isOpen(st, k); }).map(function (k) { return D.SHIFTS[k].name; });
+      h += '<div class="card buy"><div><h4>' + esc(st.name) + '<span class="tag">' + E.LOC[st.locId].name + '</span></h4>' +
+        '<p>' + (y ? '昨天淨利 <b class="' + (y.profit < 0 ? 'bad' : 'good') + '">' + signed(y.profit) + '</b>・' : '') + '口碑 ' + Math.round(st.rep) + (gaps.length ? '・<b class="bad">' + gaps.join('、') + '沒人顧</b>' : '') + '</p></div>' +
+        (i === CH.active ? '<span class="done">你在這裡</span>' : '<button class="btn sm" data-act="switchStore" data-i="' + i + '">去這家店</button>') + '</div>';
+    });
+    if (!CH.unlocked) h += '<p class="note">現金存到 <b>' + money(C.GOAL) + '</b>，就可以選擇光榮退休（破關），或頂下一間分店繼續挑戰。</p>';
+    h += '</div><div class="win-foot">' +
+      (w >= C.GOAL ? '<button class="btn" data-act="retire">光榮退休</button>' : '') +
+      (CH.unlocked && CH.stores.length < C.MAX_STORES ? '<button class="btn" data-act="branch">開分店</button>' : '') +
+      '<button class="btn primary" data-act="closeModal">回到店裡</button></div>';
+    openModal(h, 'hq');
+  }
+  function showMilestone() {
+    AU.good();
+    openModal('<h2>現金突破 300 萬！</h2><div class="win-body"><div class="advice big"><img class="mascot" alt="" src="' + SC.mascot() + '"><p>店長，我們做到了！用了 <b>' + (CH.stores[0].day - 1) + ' 天</b>。<br>接下來有兩條路：<b>光榮退休</b>，把成績留在名人堂；或是<b>頂下一間分店</b>，看看你能不能同時顧好兩家店。</p></div></div>' +
+      '<div class="win-foot col"><button class="btn primary" data-act="branch">開分店，繼續挑戰</button><button class="btn" data-act="retire">光榮退休（破關）</button><button class="btn" data-act="closeModal">先繼續經營，之後再到「總部」決定</button></div>', 'milestone');
+  }
+  function hallHtml(mark) {
+    if (!pref.hall.length) return '<p class="sub">還沒有人退休。存到 ' + money(C.GOAL) + ' 現金、選擇光榮退休，就會留名在這裡。</p>';
+    let h = '<table class="pnl hall"><tr><th>#</th><th>店名</th><th>天數</th><th>累計營收</th></tr>';
+    pref.hall.forEach(function (r, i) {
+      h += '<tr class="' + (r === mark ? 'me' : '') + '"><td>' + (i + 1) + '</td><td>' + esc(r.name) + (r.stores > 1 ? '<small>・' + r.stores + ' 家店</small>' : '') + '</td><td>' + r.days + ' 天</td><td>' + money(r.rev) + '</td></tr>';
+    });
+    return h + '</table><p class="sub">依天數排序（越少越厲害）。目前只記錄這台裝置上的成績。</p>';
+  }
+  function showHall() {
+    openModal('<h2>名人堂</h2><div class="win-body">' + hallHtml() + '</div><div class="win-foot"><button class="btn primary" data-act="closeModal">關閉</button></div>', 'howto');
+  }
+  function showRetired(rec) {
+    AU.good();
+    openModal('<h2>光榮退休</h2><div class="win-body center"><div class="medal m3">退</div><h3>' + esc(rec.name) + '</h3>' +
+      '<p class="story">你把鑰匙交給下一任店長，走出店門時，門鈴又「叮咚」了一聲。</p>' +
+      '<div class="kv"><span>經營天數</span><b>' + rec.days + ' 天</b><span>累計營收</span><b>' + money(rec.rev) + '</b><span>店數</span><b>' + rec.stores + ' 家</b><span>總資產</span><b>' + money(rec.worth) + '</b></div>' +
+      '<h3 class="grp">名人堂</h3>' + hallHtml(rec) + '</div><div class="win-foot"><button class="btn primary" data-act="quit">回標題</button></div>', 'result');
   }
   function showMenu() {
     openModal('<h2>選單</h2><div class="win-foot col">' +
@@ -510,11 +674,12 @@
     openModal('<h2>怎麼玩</h2><div class="win-body"><ol class="howto">' +
       '<li><b>按「×1」開始營業。</b>客人會走進來找想買的東西，買不到會不開心。</li>' +
       '<li><b>店面下方的長條</b>是今天每小時的人潮：橘色是已經來的客人，藍色是預估，斜紋代表那一班沒人顧店。</li>' +
-      '<li><b>進貨：</b>設定每種商品明天要補到幾個、賣多少錢。鮮食和報紙賣不完當天就報廢。</li>' +
+      '<li><b>進貨：</b>設定每種商品要「補到」幾個、賣多少錢。貨車每天<b>清晨 06:00</b> 送到；等不及可以按「立刻到貨」，馬上上架但多收三成運費。鮮食和報紙賣不完當天就報廢。</li>' +
       '<li><b>設備：</b>買了冷藏櫃才能賣飲料、買了鮮食櫃才能賣便當。看每天結算的建議決定先買什麼。</li>' +
       '<li><b>店員：</b>三個班都要有人，店才會 24 小時營業。</li>' +
       '<li><b>宣傳：</b>口碑和廣告決定你從對手那裡搶到多少客人。</li>' +
-      '<li><b>目標：</b>30 天結束時，總資產越高，獎牌越好。之後可以繼續自由經營。</li></ol>' +
+      '<li><b>音樂：</b>早班、晚班、大夜各有一首，聽到音樂變了就是換班了。</li>' +
+      '<li><b>目標：</b>30 天結束時依總資產頒獎牌。之後繼續存到<b>現金 300 萬</b>，就能選擇光榮退休（破關、進名人堂）或開分店，最多四家店可以切換經營。</li></ol>' +
       '<p class="sub">每天結束會自動存檔。開著分頁或視窗時，時間會暫停。</p></div>' +
       '<div class="win-foot"><button class="btn primary" data-act="closeModal">知道了</button></div>', 'howto');
   }
@@ -532,7 +697,7 @@
     '店長好！我是門口那顆門鈴，大家叫我<b>咚咚</b>。從今天起我當你的顧問。',
     '店裡現在只有一座<b>貨架</b>和一台<b>冷藏櫃</b>。很多客人想買的東西我們還沒賣，每天結算時我會告訴你該添什麼設備。',
     '晚班有工讀生阿明，早班你自己顧，<b>大夜班還沒人</b>——到「店員」請一位，店才會 24 小時開著。',
-    '目標是 <b>30 天後</b>讓總資產越高越好。準備好了就按「×1」開門營業！',
+    '第一個目標是 <b>30 天後</b>的獎牌；最終目標是存到<b>現金 300 萬</b>——到時候可以光榮退休，也可以開分店。準備好了就按「×1」開門營業！',
   ];
   function showTutorial(i) {
     openModal('<h2>咚咚的開店叮嚀</h2><div class="win-body"><div class="advice big"><img class="mascot" alt="" src="' + SC.mascot() + '"><p>' + TUTORIAL[i] + '</p></div></div>' +
@@ -544,20 +709,42 @@
   }
 
   /* ---------- 遊戲迴圈 ---------- */
-  function running() { return ui.screen === 'game' && !ui.paused && !ui.sheet && !ui.modal && S && !S.over; }
+  function running() { return ui.screen === 'game' && !ui.paused && !ui.sheet && !ui.modal && S && !C.over(CH) && !CH.retired; }
+  function crewNames(sh) {
+    const names = [];
+    if (S.owner.shift === sh) names.push('店長');
+    S.staff.forEach(function (m) { if (m.shift === sh && !m.sick) names.push(m.name); });
+    if (S.temp[sh]) names.push('臨時工');
+    return names;
+  }
   function doTick() {
     const before = {};
     D.PRODUCTS.forEach(function (p) { before[p.id] = S.stock[p.id]; });
     const noteKey = S.day * 3 + E.shiftOf(S.t);
     const shiftName = D.SHIFTS[E.shiftOf(S.t)].name;
     const hour = S.t;
-    const res = E.tickHour(S);
+    const prevShift = E.shiftOf(Math.min(S.t, 23));
+    const out = C.tick(CH);
+    const res = out.res;
     if (res.event) { showEvent(res.event); return; }
     if (res.blocked) return;
-    if (res.dayEnded) ui.hours = []; else ui.hours[hour] = { n: res.n, open: res.open };
+    if (res.dayEnded) ui.hoursBy = {};
+    else {
+      (ui.hoursBy[CH.active] = ui.hoursBy[CH.active] || [])[hour] = { n: res.n, open: res.open };
+      out.bg.forEach(function (b) { if (b.res) (ui.hoursBy[b.i] = ui.hoursBy[b.i] || [])[hour] = { n: b.res.n, open: b.res.open }; });
+    }
     if (res.visits && res.visits.length) { scene.addVisits(res.visits, SPEED_MS[ui.speed]); AU.ding(); }
     // 跑馬燈
     let msg = res.msgs && res.msgs[0];
+    // 分店的突發狀況：由當班的人先處理，這裡回報結果
+    out.bg.forEach(function (b) { b.notes.forEach(function (n) { if (!msg) msg = '〔' + CH.stores[b.i].name + '〕' + n.title + '：' + n.text; }); });
+    // 換班：音樂跟著換
+    const nowShift = E.shiftOf(Math.min(S.t, 23));
+    if (!res.dayEnded && nowShift !== prevShift) {
+      AU.setShift(nowShift, true);
+      const who = crewNames(nowShift);
+      if (!msg) msg = '換班了！' + D.SHIFTS[nowShift].name + (who.length ? '上工：' + who.join('、') + '。' : '沒人顧店，這段時間不營業。');
+    }
     if (!msg && res.open === false && res.n > 3 && !res.dayEnded && !S.closedToday && ui.closedNote !== noteKey) {
       ui.closedNote = noteKey;
       msg = shiftName + '沒人顧店，客人看到「準備中」就走了……到「店員」排個班吧。';
@@ -571,6 +758,8 @@
     if (msg) say(msg);
     updateHud();
     if (res.dayEnded) {
+      ui.lastBg = out.bg;
+      ui.milestone = ui.milestone || out.milestone;
       save();
       showReport(res.report);
     }
@@ -596,15 +785,27 @@
   }
 
   /* ---------- 開始、繼續 ---------- */
-  function startGame(state, speed, hours, greet) {
-    S = state;
-    ui.hours = Array.isArray(hours) ? hours : [];
-    ui.speed = speed || 1;
+  function startGame(chain, speed, hours, greet) {
+    CH = chain;
+    S = C.cur(CH);
+    C.sync(CH);
+    ui.hoursBy = hours || {};
+    ui.lastBg = []; ui.milestone = false; ui.branchMode = false;
+    ui.stockQ = ''; ui.stockCat = 'all';
+    ui.speed = speed === 2 ? 2 : 1;
     ui.paused = true;
     ui.sheet = null;
     ui.slotSel = null;
     ui.acc = 0;
     ui.tick = greet || '';
+    AU.setShift(E.shiftOf(Math.min(S.t, 23)), false);
+    renderGame();
+  }
+  function backToGame(msg) {
+    ui.branchMode = false;
+    S = C.cur(CH);
+    if (msg) ui.tick = msg;
+    ui.sheet = null; ui.slotSel = null;
     renderGame();
   }
   function afterAction(res, rerender) {
@@ -622,25 +823,70 @@
       renderCity();
     },
     newConfirmed: function () { closeModal(); renderCity(); },
-    continue: function () { const sv = loadSave(); if (sv) startGame(sv.state, sv.speed, sv.hours, '歡迎回來，店長！第 ' + sv.state.day + ' 天，按「×1」繼續營業。'); },
-    city: function (el) { ui.cityId = el.getAttribute('data-id'); ui.locId = null; renderLoc(); },
+    continue: function () { const sv = loadSave(); if (sv) startGame(sv.chain, sv.speed, sv.hours, '歡迎回來，店長！第 ' + sv.chain.stores[0].day + ' 天，按「×1」繼續營業。'); },
+    city: function (el) { ui.cityId = el.getAttribute('data-id'); ui.locId = null; ui.nameDraft = null; renderLoc(); },
     loc: function (el) { ui.nameDraft = $('#storeName').value; ui.locId = el.getAttribute('data-id'); renderLoc(); },
     start: function () {
       const name = ($('#storeName').value || '').trim() || '叮咚便利店';
       // 網址加上 ?seed=數字 可以指定亂數種子（自動化測試用，讓每次結果一樣）
       const fixed = /[?&]seed=(\d+)/.exec(root.location ? root.location.search : '');
       const st = E.newGame({ locId: ui.locId, name: name, seed: fixed ? +fixed[1] : (Date.now() % 2147483647) | 0 });
-      startGame(st, 1);
+      startGame(C.create(st), 1);
       save();
       showTutorial(0);
     },
+    // ---- 連鎖 ----
+    goal: function () { if (S.medal) showHQ(); else { ui.sheet = ui.sheet === 'report' ? null : 'report'; renderSheet(); } },
+    hq: function () { showHQ(); },
+    hall: function () { showHall(); },
+    switchStore: function (el) {
+      const i = +el.getAttribute('data-i');
+      closeModal();
+      if (i === CH.active || !C.switchTo(CH, i).ok) return;
+      S = C.cur(CH);
+      scene.setState(S);
+      ui.sheet = null; ui.slotSel = null; ui.closedNote = -1;
+      renderSheet();
+      say('來到' + S.name + '（' + E.LOC[S.locId].name + '）。' + (S.lastReport && S.lastReport.tips[0] ? S.lastReport.tips[0] : ''));
+      AU.click();
+    },
+    branch: function () {
+      if (!CH.unlocked) { toast('現金存到 ' + money(C.GOAL) + ' 之後才能開分店。', true); return; }
+      closeModal(); ui.milestone = false;
+      ui.branchMode = true; ui.locId = null; ui.nameDraft = null;
+      scene = null;
+      renderCity();
+    },
+    backToGame: function () { backToGame(); },
+    branchStart: function () {
+      const name = ($('#storeName').value || '').trim() || '分店';
+      const res = C.openBranch(CH, ui.locId, name, (Date.now() % 2147483647) | 0);
+      if (!res.ok) { toast(res.msg, true); AU.bad(); return; }
+      C.switchTo(CH, res.index);
+      backToGame(res.msg + '分店沒有你親自站櫃台，記得到「店員」把大夜班補上。');
+      AU.good();
+      save();
+    },
+    retire: function () { confirmBox('光榮退休之後，這次的經營就結束了，成績會留在名人堂。', 'retireConfirmed'); },
+    retireConfirmed: function () {
+      const res = C.retire(CH);
+      if (!res.ok) { closeModal(); toast(res.msg, true); return; }
+      const rec = { name: res.result.name, days: res.result.days, rev: res.result.rev, stores: res.result.stores, worth: res.result.worth, at: Date.now() };
+      pref.hall.push(rec);
+      pref.hall.sort(function (a, b) { return a.days - b.days || b.rev - a.rev; });
+      pref.hall = pref.hall.slice(0, HALL_MAX);
+      savePref();
+      clearSave();
+      showRetired(rec);
+    },
+    stockCat: function (el) { ui.stockCat = el.getAttribute('data-k'); AU.click(); applyStockFilter(); },
     tutorial: function (el) {
       const i = +el.getAttribute('data-i');
       if (i < TUTORIAL.length) showTutorial(i); else { closeModal(); pref.tutorial = true; savePref(); }
     },
     speed: function (el) {
       const v = +el.getAttribute('data-v');
-      if (v === 0) ui.paused = true; else { ui.paused = false; ui.speed = v; scene.setSpeed(SPEED_MULT[v]); }
+      if (v === 0) ui.paused = true; else { ui.paused = false; ui.speed = v === 2 ? 2 : 1; scene.setSpeed(SPEED_MULT[ui.speed]); }
       ui.acc = 0;
       updateHud();
     },
@@ -663,7 +909,7 @@
       if (ui.screen === 'title') renderTitle(); else showMenu();
     },
     saveNow: function () { const done = save(); toast(done ? '存檔完成。' : '這個瀏覽器不讓網頁存檔，進度只會保留到關閉為止。', !done); },
-    quit: function () { save(); closeModal(); S = null; scene = null; renderTitle(); },
+    quit: function () { save(); closeModal(); S = null; CH = null; scene = null; AU.setShift(0, false); renderTitle(); },
     choose: function (el) {
       const text = E.resolveEvent(S, +el.getAttribute('data-i'));
       openModal('<h2>結果</h2><div class="win-body"><p class="story">' + esc(text) + '</p></div><div class="win-foot"><button class="btn primary" data-act="closeModal">好</button></div>', 'event');
@@ -671,12 +917,14 @@
     },
     nextDay: function () {
       closeModal();
-      say('第 ' + S.day + ' 天，' + D.WEATHER[S.weather].name + '。' + (S.lastReport && S.lastReport.tips[0] ? S.lastReport.tips[0] : ''));
-      if (S.over === 'bankrupt') showBankrupt();
+      const got = S.lastReport ? S.lastReport.orderCost : 0;
+      say('第 ' + S.day + ' 天，' + D.WEATHER[S.weather].name + '。' + (got ? '清晨的貨車送來 ' + money(got) + ' 的貨。' : '') + (S.lastReport && S.lastReport.tips[0] ? S.lastReport.tips[0] : ''));
+      AU.setShift(0, true);
+      if (C.over(CH)) showBankrupt();
       else if (S.lastReport && S.lastReport.goal) {
         if ((pref.best[S.locId] | 0) < S.medal.tier) { pref.best[S.locId] = S.medal.tier; savePref(); }
         showResult();
-      }
+      } else if (ui.milestone) { ui.milestone = false; showMilestone(); }
       updateHud();
     },
     price: function (el) {
@@ -706,6 +954,7 @@
     const el = e.target.closest('[data-act]');
     if (el && el.tagName !== 'INPUT' && ACT[el.getAttribute('data-act')]) {
       ACT[el.getAttribute('data-act')](el);
+      if (CH && S) C.sync(CH, S);   // 所有的店共用一個錢包
       return;
     }
     if (e.target.id === 'scene' && scene && !ui.modal) {
@@ -717,6 +966,7 @@
   });
   app.addEventListener('input', function (e) {
     const el = e.target;
+    if (el.getAttribute('data-act') === 'stockSearch') { ui.stockQ = el.value; applyStockFilter(); return; }
     if (el.getAttribute('data-act') !== 'target') return;
     const row = el.closest('.prod');
     E.setTarget(S, row.getAttribute('data-pid'), +el.value);
@@ -727,6 +977,8 @@
     if (el.getAttribute('data-act') !== 'target') return;
     const row = el.closest('.prod');
     row.outerHTML = prodRow(E.P[row.getAttribute('data-pid')]);
+    const sum = $('#stockSum');
+    if (sum) sum.innerHTML = stockSummary();
   });
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') { if (ui.modal === 'menu' || ui.modal === 'howto') closeModal(); else if (ui.sheet && !ui.modal) ACT.closeSheet(); }
@@ -738,7 +990,7 @@
   root.addEventListener('resize', fitStage);
 
   // 供自動化測試使用
-  root.DD_UI = { state: function () { return S; }, ui: ui, tick: doTick, act: ACT };
+  root.DD_UI = { state: function () { return S; }, chain: function () { return CH; }, ui: ui, tick: doTick, act: ACT };
 
   renderTitle();
   if (document.fonts && document.fonts.load) document.fonts.load('15px "Huninn"');

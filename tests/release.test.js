@@ -15,6 +15,10 @@ test('依 commit 類型決定版號', () => {
   assert.equal(R.analyze([c('feat!: 存檔格式改版')], '0.3.1').version, '0.4.0', '1.0 之前破壞性變更只升次版號');
   assert.equal(R.analyze([c('feat!: 存檔格式改版')], '1.3.1').version, '2.0.0');
   assert.equal(R.analyze([c('fix: a', 'BREAKING CHANGE: 舊存檔失效')], '1.3.1').version, '2.0.0');
+  const multi = R.analyze([c('feat: 開分店', '說明文字\nfeat: 名人堂\nbalance: 拿掉八倍速\n不是條目的句子：不會被列入')], '0.2.0');
+  assert.equal(multi.version, '0.3.0');
+  assert.match(multi.body, /### 新功能\n\n- 開分店\n- 名人堂\n\n### 數值調整\n\n- 拿掉八倍速$/, '內文裡每一行 feat:／fix: 都各自成為一條');
+  assert.equal(R.analyze([c('docs: 文件', 'fix: 順手修了排版')], '0.2.0').version, '0.2.1');
   const body = R.analyze([c('feat: 新增店貓'), c('fix: 修正溢出'), c('feat: 新增冰沙機')], '0.1.0').body;
   assert.match(body, /### 新功能\n\n- 新增店貓\n- 新增冰沙機\n\n### 修正\n\n- 修正溢出/);
 });
