@@ -2,6 +2,7 @@
 用法：python3 scripts/smoke.py [輸出截圖的資料夾] [要測的 html，預設 index.html]
 這是 loop engineering 的「驗證閘門」之一。"""
 import os
+import subprocess
 import sys
 from playwright.sync_api import sync_playwright
 
@@ -18,11 +19,16 @@ def check(cond, msg):
     print(('  ✓ ' if cond else '  ✗ ') + msg)
 
 
+# 排行榜的假後端：同一份 backend/Code.gs，跑在本機的小伺服器上
+mock = subprocess.Popen(['node', os.path.join(ROOT, 'scripts', 'mock-backend.js')], stdout=subprocess.PIPE, text=True)
+API = 'http://127.0.0.1:' + mock.stdout.readline().split()[1] + '/'
+
 with sync_playwright() as p:
     browser = p.chromium.launch()
     ctx = browser.new_context(viewport={'width': 390, 'height': 700}, device_scale_factor=2, has_touch=True)
     # 網路字型在測試裡一律回空白樣式：沒有網路的環境也能跑，而且每次用同一套備用字型，截圖才比得起來
     ctx.route('**/fonts.googleapis.com/**', lambda r: r.fulfill(status=200, content_type='text/css', body=''))
+    ctx.add_init_script("window.DD_CONFIG = { api: '%s' };" % API)
     page = ctx.new_page()
     page.on('pageerror', lambda e: errors.append(str(e)))
     page.on('console', lambda m: errors.append(m.text) if m.type == 'error' else None)
@@ -48,6 +54,27 @@ with sync_playwright() as p:
 
     shot('01-title')
     check(page.locator('#titleCanvas').count() == 1, '標題畫面出現')
+
+    # 線上排行榜與留言板（連到本機的假後端）
+    page.click('[data-act=hall]')
+    page.wait_for_selector('#bTop:has-text("還沒有人上榜")')
+    check(True, '排行榜讀得到線上資料（目前是空的）')
+    page.click('[data-act=postComment]')
+    check('請填店名' in page.locator('#cNote').inner_text(), '沒填店名不能留言')
+    page.fill('#cName', '路人甲')
+    page.fill('#cText', '好玩！<img src=x onerror="window.__xss=1"> 建議加宵夜')
+    page.click('[data-act=postComment]')
+    page.wait_for_selector('#bMsgs li')
+    check(page.locator('#bMsgs li').count() == 1 and '<img' in page.locator('#bMsgs li p').inner_text(), '留言送出後立刻出現在留言板')
+    check(page.locator('#bMsgs img').count() == 0 and not page.evaluate('window.__xss'), '留言裡的 HTML 只會被當成文字顯示')
+    check(page.input_value('#cText') == '', '送出後輸入框清空')
+    page.fill('#cText', '連續洗版')
+    page.click('[data-act=postComment]')
+    page.wait_for_selector('#cNote.bad')
+    check('太頻繁' in page.locator('#cNote').inner_text() and page.locator('#bMsgs li').count() == 1, '同一台裝置短時間內不能連續留言')
+    shot('01b-board')
+    no_overflow('排行榜')
+    page.click('#modal [data-act=closeModal]')
     page.click('[data-act=new]')
     shot('02-city')
     page.click('[data-act=city][data-id=kaohsiung]')
@@ -267,23 +294,54 @@ with sync_playwright() as p:
     page.wait_for_timeout(600)
     page.click('[data-act=continue]')
     check(page.evaluate('DD_UI.chain().stores.length') == 2, '重新整理後兩家店都讀得回來')
-    page.evaluate('() => { const c = DD_UI.chain(); c.stores.forEach(s => { s.cash = 3100000; }); }')
+    page.evaluate('() => { const c = DD_UI.chain(); c.stores.forEach(s => { s.cash = 3100000; s.day = 151; }); c.totalRev = 6543210; }')
     page.click('.hud [data-act=goal]')
     page.click('#modal [data-act=retire]')
     page.click('#modal [data-act=retireConfirmed]')
-    check(page.locator('#modal .hall tr.me').count() == 1, '退休後成績進名人堂')
+    check(page.locator('#modal .hall tr.me').count() == 1, '退休後成績記在這台裝置上')
     shot('20-retired')
-    page.click('[data-act=quit]')
+    page.click('#modal [data-act=submitScore]')
+    page.wait_for_selector('#bTop tr.me')
+    row = page.locator('#bTop tr.me').inner_text()
+    check('測試商店' in row and '150 天' in row and '$6,543,210' in row, '成績送上線上排行榜，並標出自己那一列')
+    check('第 1 名' in page.locator('#toast').inner_text(), '送出後告訴玩家目前第幾名')
+    shot('21-board-ranked')
+    no_overflow('排行榜（有成績與留言）')
+    page.click('#modal [data-act=quit]')
     check(page.locator('[data-act=continue]').count() == 0, '退休後存檔結束，標題不再有「繼續經營」')
     page.click('[data-act=hall]')
-    check(page.locator('#modal .hall tr').count() == 2, '標題畫面可以看名人堂')
+    page.wait_for_selector('#bTop tr')
+    check(page.locator('#bTop tr').count() == 2 and page.locator('#bMsgs li').count() == 1, '回到標題再打開，線上的成績與留言都還在')
     page.click('#modal [data-act=closeModal]')
+    # 後端連不上時：說清楚，而且本機紀錄照常顯示
+    seen = len(errors)
+    page.route(API + '**', lambda r: r.abort())
+    page.click('[data-act=hall]')
+    page.wait_for_selector('#bTop .bad')
+    check('連不到排行榜' in page.locator('#bTop').inner_text() and page.locator('#modal .hall tr.me, #modal .hall tr').count() >= 2, '後端連不上時顯示原因，本機紀錄照常顯示')
+    page.click('#modal [data-act=closeModal]')
+    page.unroute(API + '**')
+    del errors[seen:]  # 這一段是故意把連線切斷，瀏覽器記下的連線失敗不算錯誤
 
     # 桌機寬度也要正常
     page.set_viewport_size({'width': 1200, 'height': 800})
     page.wait_for_timeout(300)
     shot('13-desktop')
+
+    # 還沒設定後端網址時（repo 的預設狀態）：只顯示本機紀錄，不會發出任何連線
+    ctx2 = browser.new_context(viewport={'width': 390, 'height': 700})
+    ctx2.route('**/fonts.googleapis.com/**', lambda r: r.fulfill(status=200, content_type='text/css', body=''))
+    page2 = ctx2.new_page()
+    reqs = []
+    page2.on('request', lambda r: reqs.append(r.url) if r.url.startswith('http') and 'fonts.googleapis' not in r.url else None)
+    page2.goto('file://' + os.path.join(ROOT, PAGE))
+    page2.wait_for_timeout(400)
+    page2.click('[data-act=hall]')
+    check('還沒有開通' in page2.locator('#modal').inner_text() and page2.locator('#cText').count() == 0, '沒設定後端時，排行榜說明尚未開通')
+    check(not reqs, '沒設定後端時不會連到任何外部網址' + (('：' + reqs[0]) if reqs else ''))
     browser.close()
+
+mock.terminate()
 
 check(not errors, '沒有 JavaScript 錯誤' + ('：' + ' | '.join(errors[:3]) if errors else ''))
 failed = [m for ok, m in checks if not ok]

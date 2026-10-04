@@ -2,6 +2,7 @@
 (function (root) {
   'use strict';
   const D = root.DD_DATA, E = root.DD, C = root.DD_CHAIN, SC = root.DD_SCENE, AU = root.DD_AUDIO;
+  const CLOUD = root.DD_CLOUD || { enabled: false };
   const VER = root.DD_VERSION || { version: 'dev', changelog: [] };
   const SAVE_KEY = 'dingdong-mart-save-v1';
   const PREF_KEY = 'dingdong-mart-pref-v1';
@@ -31,7 +32,7 @@
   const ui = { screen: 'title', speed: 1, paused: true, sheet: null, slotSel: null, modal: null, acc: 0, last: 0,
     cityId: null, locId: null, tick: '', closedNote: -1, toastTimer: null, hoursBy: {}, stockQ: '', stockCat: 'all',
     lastBg: [], milestone: false, branchMode: false };
-  const pref = { sfx: true, music: true, tutorial: false, best: {}, hall: [] };
+  const pref = { sfx: true, music: true, tutorial: false, best: {}, hall: [], nick: '' };
   function hoursOf() { return (CH && ui.hoursBy[CH.active]) || []; }
 
   /* ---------- 存檔 ---------- */
@@ -49,7 +50,7 @@
   function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* 沒有儲存空間就算了 */ } }
   (function () {
     const p = fetchStored(PREF_KEY);
-    if (p) { pref.sfx = p.sfx !== false; pref.music = p.music !== false; pref.tutorial = !!p.tutorial; pref.best = p.best && typeof p.best === 'object' ? p.best : {}; pref.hall = Array.isArray(p.hall) ? p.hall.slice(0, HALL_MAX) : []; }
+    if (p) { pref.sfx = p.sfx !== false; pref.music = p.music !== false; pref.tutorial = !!p.tutorial; pref.best = p.best && typeof p.best === 'object' ? p.best : {}; pref.hall = Array.isArray(p.hall) ? p.hall.slice(0, HALL_MAX) : []; pref.nick = typeof p.nick === 'string' ? p.nick.slice(0, 10) : ''; }
     AU.setSfx(pref.sfx); AU.setMusic(pref.music);
   })();
   function savePref() { store(PREF_KEY, pref); }
@@ -91,7 +92,7 @@
         '<div class="title-btns">' +
           (sv ? '<button class="btn big primary" data-act="continue">繼續經營<small>' + esc(sv.chain.stores[0].name) + (sv.chain.stores.length > 1 ? ' 等 ' + sv.chain.stores.length + ' 家店' : '') + '・第 ' + sv.chain.stores[0].day + ' 天</small></button>' : '') +
           '<button class="btn big' + (sv ? '' : ' primary') + '" data-act="new">開一家新店</button>' +
-          '<div class="title-row three"><button class="btn" data-act="howto">怎麼玩</button><button class="btn" data-act="hall">名人堂</button><button class="btn" data-act="changelog">更新紀錄</button></div>' +
+          '<div class="title-row three"><button class="btn" data-act="howto">怎麼玩</button><button class="btn" data-act="hall">排行榜</button><button class="btn" data-act="changelog">更新紀錄</button></div>' +
         '</div>' +
         '<p class="title-foot"><button class="link" data-act="toggleMusic">音樂：' + (pref.music ? '開' : '關') + '</button>' +
           '<button class="link" data-act="toggleSfx">音效：' + (pref.sfx ? '開' : '關') + '</button><span>v' + esc(VER.version) + '</span></p>' +
@@ -518,7 +519,7 @@
     const city = D.CITIES[S.cityId];
     const g = goalInfo();
     let html = '<div class="card"><h4>終極目標：現金 ' + money(C.GOAL) + '</h4><div class="goalrow' + (C.wallet(CH) >= C.GOAL ? ' hit' : '') + '"><span>現金</span>' + bar(C.wallet(CH), C.GOAL, 'gold') + '<b>' + money(C.wallet(CH)) + '</b></div>' +
-      '<p class="sub">存到之後可以光榮退休（破關、進名人堂），或頂下一間分店繼續挑戰。經營 ' + (CH.stores[0].day - 1) + ' 天・累計營收 ' + money(CH.totalRev) + '</p>' +
+      '<p class="sub">存到之後可以光榮退休（破關、進排行榜），或頂下一間分店繼續挑戰。經營 ' + (CH.stores[0].day - 1) + ' 天・累計營收 ' + money(CH.totalRev) + '</p>' +
       '<button class="btn wide" data-act="hq">總部' + (CH.stores.length > 1 ? '（' + CH.stores.length + ' 家店）' : '') + '</button></div>';
     if (!S.branch) {
       html += '<div class="card"><h4>' + city.days + ' 天評比：總資產</h4>';
@@ -618,7 +619,7 @@
     openModal('<h2>倒閉了……</h2><div class="win-body center"><p class="story">透支超過 ' + money(-E.OVERDRAFT) + '，銀行把' + (CH.stores.length > 1 ? '所有的店都' : '店') + '收走了。<br>你在鐵門上貼了一張紙：「感謝街坊 ' + (S.day - 1) + ' 天來的照顧。」</p></div>' +
       '<div class="win-foot"><button class="btn primary" data-act="quit">回標題重新來過</button></div>', 'result');
   }
-  /* ---------- 總部：分店、里程碑、退休、名人堂 ---------- */
+  /* ---------- 總部：分店、里程碑、退休、排行榜 ---------- */
   function showHQ() {
     const w = C.wallet(CH);
     let h = '<h2>總部</h2><div class="win-body">' +
@@ -641,7 +642,7 @@
   }
   function showMilestone() {
     AU.good();
-    openModal('<h2>現金突破 300 萬！</h2><div class="win-body"><div class="advice big"><img class="mascot" alt="" src="' + SC.mascot() + '"><p>店長，我們做到了！用了 <b>' + (CH.stores[0].day - 1) + ' 天</b>。<br>接下來有兩條路：<b>光榮退休</b>，把成績留在名人堂；或是<b>頂下一間分店</b>，看看你能不能同時顧好兩家店。</p></div></div>' +
+    openModal('<h2>現金突破 300 萬！</h2><div class="win-body"><div class="advice big"><img class="mascot" alt="" src="' + SC.mascot() + '"><p>店長，我們做到了！用了 <b>' + (CH.stores[0].day - 1) + ' 天</b>。<br>接下來有兩條路：<b>光榮退休</b>，把成績留在排行榜；或是<b>頂下一間分店</b>，看看你能不能同時顧好兩家店。</p></div></div>' +
       '<div class="win-foot col"><button class="btn primary" data-act="branch">開分店，繼續挑戰</button><button class="btn" data-act="retire">光榮退休（破關）</button><button class="btn" data-act="closeModal">先繼續經營，之後再到「總部」決定</button></div>', 'milestone');
   }
   function hallHtml(mark) {
@@ -650,23 +651,65 @@
     pref.hall.forEach(function (r, i) {
       h += '<tr class="' + (r === mark ? 'me' : '') + '"><td>' + (i + 1) + '</td><td>' + esc(r.name) + (r.stores > 1 ? '<small>・' + r.stores + ' 家店</small>' : '') + '</td><td>' + r.days + ' 天</td><td>' + money(r.rev) + '</td></tr>';
     });
-    return h + '</table><p class="sub">依天數排序（越少越厲害）。目前只記錄這台裝置上的成績。</p>';
+    return h + '</table><p class="sub">依天數排序（越少越厲害）。只有這台裝置上的成績。</p>';
   }
-  function showHall() {
-    openModal('<h2>名人堂</h2><div class="win-body">' + hallHtml() + '</div><div class="win-foot"><button class="btn primary" data-act="closeModal">關閉</button></div>', 'howto');
+  /* ---------- 線上排行榜與留言板（後端：backend/Code.gs） ---------- */
+  function dateTxt(at) { const d = new Date(at); return isNaN(d.getTime()) ? '' : (d.getMonth() + 1) + '/' + d.getDate(); }
+  function boardTopHtml(b, mark) {
+    if (!b.top.length) return '<p class="sub">還沒有人上榜，你可以當第一個。</p>';
+    let h = '<table class="pnl hall"><tr><th>#</th><th>店名</th><th>天數</th><th>累計營收</th></tr>';
+    b.top.forEach(function (r, i) {
+      const me = mark && r.name === mark.name && r.days === mark.days && r.rev === mark.rev;
+      h += '<tr class="' + (me ? 'me' : '') + '"><td>' + (i + 1) + '</td><td>' + esc(r.name) + '<small>' + (r.loc ? '・' + esc(r.loc) : '') + (r.stores > 1 ? '・' + (r.stores | 0) + ' 家店' : '') + '</small></td><td>' + (r.days | 0) + ' 天</td><td>' + money(+r.rev || 0) + '</td></tr>';
+    });
+    return h + '</table><p class="sub">依天數排序（越少越厲害），同天數比累計營收。目前共有 ' + (b.count | 0) + ' 位店長光榮退休。</p>';
+  }
+  function boardMsgsHtml(b) {
+    if (!b.comments.length) return '<p class="sub">還沒有人留言。</p>';
+    let h = '<ul class="msgs">';
+    b.comments.forEach(function (c) { h += '<li><b>' + esc(c.name) + '</b><small>' + dateTxt(c.at) + '</small><p>' + esc(c.text) + '</p></li>'; });
+    return h + '</ul>';
+  }
+  function fillBoard(b, mark) {
+    if (ui.modal !== 'board') return;
+    const top = $('#bTop'), msgs = $('#bMsgs');
+    if (!top || !msgs) return;
+    if (!b.ok || !Array.isArray(b.top) || !Array.isArray(b.comments)) { top.innerHTML = '<p class="sub bad">' + esc(b.msg || '排行榜的回應看不懂。') + '</p>'; msgs.innerHTML = ''; return; }
+    top.innerHTML = boardTopHtml(b, mark);
+    msgs.innerHTML = boardMsgsHtml(b);
+  }
+  function showBoard(mark) {
+    const done = CH && CH.retired;
+    let h = '<h2>排行榜</h2><div class="win-body">';
+    if (CLOUD.enabled) {
+      h += '<h3 class="grp">前十名<small>所有玩家</small></h3><div id="bTop"><p class="sub">讀取中……</p></div>' +
+        '<h3 class="grp">留言板<small>所有人都看得到</small></h3>' +
+        '<div class="card msgform"><label class="namefield">店名<input id="cName" maxlength="10" autocomplete="off" value="' + esc(pref.nick || (CH ? CH.stores[0].name : '')) + '"></label>' +
+        '<textarea id="cText" maxlength="140" rows="2" placeholder="給作者的建議，或給其他店長的話（140 字以內）" aria-label="留言內容"></textarea>' +
+        '<div class="msgbar"><span class="sub" id="cNote" aria-live="polite"></span><button class="btn sm primary" data-act="postComment">送出留言</button></div></div>' +
+        '<div id="bMsgs"></div>';
+    } else {
+      h += '<p class="note">線上排行榜還沒有開通，現在只看得到這台裝置上的成績。</p>';
+    }
+    h += '<h3 class="grp">這台裝置的紀錄</h3>' + hallHtml(mark) + '</div><div class="win-foot">' +
+      (done ? '<button class="btn primary" data-act="quit">回標題</button>' : '<button class="btn primary" data-act="closeModal">關閉</button>') + '</div>';
+    openModal(h, 'board');
+    if (CLOUD.enabled) CLOUD.board().then(function (b) { fillBoard(b, mark); });
   }
   function showRetired(rec) {
     AU.good();
     openModal('<h2>光榮退休</h2><div class="win-body center"><div class="medal m3">退</div><h3>' + esc(rec.name) + '</h3>' +
       '<p class="story">你把鑰匙交給下一任店長，走出店門時，門鈴又「叮咚」了一聲。</p>' +
       '<div class="kv"><span>經營天數</span><b>' + rec.days + ' 天</b><span>累計營收</span><b>' + money(rec.rev) + '</b><span>店數</span><b>' + rec.stores + ' 家</b><span>總資產</span><b>' + money(rec.worth) + '</b></div>' +
-      '<h3 class="grp">名人堂</h3>' + hallHtml(rec) + '</div><div class="win-foot"><button class="btn primary" data-act="quit">回標題</button></div>', 'result');
+      '<h3 class="grp">這台裝置的紀錄</h3>' + hallHtml(rec) + '</div><div class="win-foot">' +
+      (CLOUD.enabled ? '<span class="sub">上榜只會送出店名、店面、天數與營收。</span><button class="btn" data-act="quit">回標題</button><button class="btn primary" data-act="submitScore">把成績送上排行榜</button>'
+        : '<button class="btn primary" data-act="quit">回標題</button>') + '</div>', 'result');
   }
   function showMenu() {
     openModal('<h2>選單</h2><div class="win-foot col">' +
       '<button class="btn" data-act="toggleMusic">音樂：' + (pref.music ? '開' : '關') + '</button>' +
       '<button class="btn" data-act="toggleSfx">音效：' + (pref.sfx ? '開' : '關') + '</button>' +
-      '<button class="btn" data-act="howto">怎麼玩</button><button class="btn" data-act="changelog">更新紀錄</button>' +
+      '<button class="btn" data-act="howto">怎麼玩</button><button class="btn" data-act="hall">排行榜與留言板</button><button class="btn" data-act="changelog">更新紀錄</button>' +
       '<button class="btn" data-act="saveNow">立刻存檔</button><button class="btn" data-act="quit">存檔並回標題</button>' +
       '<button class="btn primary" data-act="closeModal">回到店裡</button></div><p class="sub center">v' + esc(VER.version) + '</p>', 'menu');
   }
@@ -679,7 +722,7 @@
       '<li><b>店員：</b>三個班都要有人，店才會 24 小時營業。</li>' +
       '<li><b>宣傳：</b>口碑和廣告決定你從對手那裡搶到多少客人。</li>' +
       '<li><b>音樂：</b>早班、晚班、大夜各有一首，聽到音樂變了就是換班了。</li>' +
-      '<li><b>目標：</b>30 天結束時依總資產頒獎牌。之後繼續存到<b>現金 300 萬</b>，就能選擇光榮退休（破關、進名人堂）或開分店，最多四家店可以切換經營。</li></ol>' +
+      '<li><b>目標：</b>30 天結束時依總資產頒獎牌。之後繼續存到<b>現金 300 萬</b>，就能選擇光榮退休（破關、進排行榜）或開分店，最多四家店可以切換經營。</li></ol>' +
       '<p class="sub">每天結束會自動存檔。開著分頁或視窗時，時間會暫停。</p></div>' +
       '<div class="win-foot"><button class="btn primary" data-act="closeModal">知道了</button></div>', 'howto');
   }
@@ -838,7 +881,37 @@
     // ---- 連鎖 ----
     goal: function () { if (S.medal) showHQ(); else { ui.sheet = ui.sheet === 'report' ? null : 'report'; renderSheet(); } },
     hq: function () { showHQ(); },
-    hall: function () { showHall(); },
+    hall: function () { showBoard(); },
+    postComment: function (el) {
+      const name = ($('#cName').value || '').trim(), text = ($('#cText').value || '').trim();
+      const note = $('#cNote');
+      const tell = function (msg, bad) { if (ui.modal !== 'board' || !$('#cNote')) return; $('#cNote').textContent = msg; $('#cNote').className = 'sub' + (bad ? ' bad' : ' good'); };
+      if (!name) { tell('請填店名。', true); return; }
+      if (!text) { tell('留言是空的。', true); return; }
+      el.disabled = true;
+      note.textContent = '傳送中……'; note.className = 'sub';
+      CLOUD.postComment(name, text, VER.version).then(function (b) {
+        if (el.isConnected) el.disabled = false;
+        if (!b.ok) { tell(b.msg, true); return; }
+        pref.nick = name; savePref();
+        if (ui.modal === 'board' && $('#cText')) $('#cText').value = '';
+        fillBoard(b);
+        tell('留言送出了。');
+      });
+    },
+    submitScore: function (el) {
+      const rec = ui.lastRec;
+      if (!rec) return;
+      if (rec.sent) { showBoard(rec); return; }
+      el.disabled = true; el.textContent = '傳送中……';
+      CLOUD.submitScore(rec, VER.version).then(function (b) {
+        if (!b.ok) { if (el.isConnected) { el.disabled = false; el.textContent = '再送一次'; } toast(b.msg, true); return; }
+        rec.sent = true; savePref();
+        showBoard(rec);
+        fillBoard(b, rec);
+        toast(b.rank ? '上榜了！目前第 ' + b.rank + ' 名。' : '成績送出了。');
+      });
+    },
     switchStore: function (el) {
       const i = +el.getAttribute('data-i');
       closeModal();
@@ -867,11 +940,12 @@
       AU.good();
       save();
     },
-    retire: function () { confirmBox('光榮退休之後，這次的經營就結束了，成績會留在名人堂。', 'retireConfirmed'); },
+    retire: function () { confirmBox('光榮退休之後，這次的經營就結束了，成績會留在排行榜。', 'retireConfirmed'); },
     retireConfirmed: function () {
       const res = C.retire(CH);
       if (!res.ok) { closeModal(); toast(res.msg, true); return; }
-      const rec = { name: res.result.name, days: res.result.days, rev: res.result.rev, stores: res.result.stores, worth: res.result.worth, at: Date.now() };
+      const rec = { name: res.result.name, loc: E.LOC[res.result.locId].name, days: res.result.days, rev: res.result.rev, stores: res.result.stores, worth: res.result.worth, at: Date.now() };
+      ui.lastRec = rec;
       pref.hall.push(rec);
       pref.hall.sort(function (a, b) { return a.days - b.days || b.rev - a.rev; });
       pref.hall = pref.hall.slice(0, HALL_MAX);

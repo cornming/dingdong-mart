@@ -286,6 +286,14 @@ input[type="range"]::-moz-range-thumb { width: 20px; height: 20px; background: v
 .pnl.others { margin-top: 12px; font-size: 13px; } .pnl.others .total td { font-size: 15px; }
 .pnl.hall th { text-align: left; font-weight: normal; font-size: 12px; color: var(--muted); padding: 2px 0; } .pnl.hall th:last-child { text-align: right; }
 .pnl.hall td { font-size: 13px; padding: 5px 4px 5px 0; } .pnl.hall small { color: var(--muted); } .pnl.hall tr.me td { background: #FFF6D6; }
+/* 排行榜與留言板 */
+.msgform textarea { display: block; width: 100%; margin-top: 8px; padding: 9px 12px; border: 1.5px solid var(--line); border-radius: 10px; background: var(--surface); font: inherit; color: inherit; resize: vertical; min-height: 64px; }
+.msgform .namefield { margin-top: 0; font-size: 13px; }
+.msgbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; } .msgbar .sub { margin: 0; }
+.msgs { list-style: none; padding: 0; margin: 4px 0 0; }
+.msgs li { padding: 8px 2px; border-bottom: 1px dashed #C3CCD5; } .msgs li:last-child { border-bottom: 0; }
+.msgs b { font-size: 13px; } .msgs small { color: var(--muted); margin-left: 8px; } .msgs p { font-size: 14px; overflow-wrap: anywhere; }
+.pnl.hall td small { overflow-wrap: anywhere; }
 .pnl .total td { border-bottom: 0; border-top: 1.5px solid var(--ink); font-size: 20px; padding-top: 6px; }
 .chart { display: flex; align-items: stretch; gap: 3px; height: 120px; position: relative; margin-top: 8px;
   background: linear-gradient(0deg, transparent calc(50% - .5px), var(--line) calc(50% - .5px) calc(50% + .5px), transparent calc(50% + .5px)); }
