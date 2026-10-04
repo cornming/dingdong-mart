@@ -20,6 +20,10 @@
 8. 繼續存到**現金 300 萬**，可以選擇光榮退休（破關，天數與累計營收記進名人堂），或頂下一間分店。最多四家店共用一個錢包，可以隨時切換去看。
 9. 早班、晚班、大夜各有一首音樂，聽到音樂變了就是換班了。速度只有 ×1 和 ×3。
 
+## 線上排行榜與留言板
+
+退休時可以把成績（店名、店面、天數、累計營收）送上排行榜，所有玩家都看得到前十名，也可以在留言板留言。後端是一份 Google 試算表加一小段 Apps Script，安裝步驟在 [docs/LEADERBOARD.md](docs/LEADERBOARD.md)。還沒安裝之前，遊戲只會顯示這台裝置上的紀錄，也不會連到任何外部網址。
+
 ## 專案結構
 
 | 路徑 | 內容 |
@@ -30,10 +34,13 @@
 | `src/scene.js` | 店面與標題畫面（canvas 向量繪圖，現代便利商店風格） |
 | `src/audio.js` | 音效與背景音樂（WebAudio 即時合成，沒有音檔） |
 | `src/ui.js`、`src/styles.css` | 操作介面 |
+| `src/config.js`、`src/cloud.js` | 排行榜後端的網址設定與連線 |
+| `backend/Code.gs` | 排行榜與留言板的後端（Google Apps Script，貼到試算表裡用） |
 | `src/version.js` | 遊戲內顯示的版本與更新紀錄（自動產生） |
 | `tests/` | 規則與版號腳本的單元測試 |
 | `scripts/balance.js` | 平衡模擬：三種機器人玩家跑完 12 個店面 |
 | `scripts/smoke.py` | 介面實測：無頭瀏覽器實際點過一輪並截圖 |
+| `scripts/mock-backend.js`、`scripts/gas-mock.js` | 把 `backend/Code.gs` 跑在本機，給測試用 |
 | `scripts/build.js` | 建置成單一檔案 `dist/index.html` |
 | `scripts/release.js` | 自動升版與更新紀錄 |
 | `docs/` | 設計文件與每一圈循環的紀錄 |
