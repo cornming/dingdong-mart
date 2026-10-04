@@ -8,6 +8,7 @@
 2. 上方選單點「**擴充功能**」→「**Apps Script**」（Extensions → Apps Script），會開一個程式編輯器。
 3. 把編輯器裡原本的內容**全部刪掉**，貼上 [`backend/Code.gs`](../backend/Code.gs) 的全部內容，按存檔。
    （直接複製用的純文字版：<https://raw.githubusercontent.com/cornming/dingdong-mart/main/backend/Code.gs>）
+   - 存檔時如果出現 `SyntaxError: Unexpected token '*'`：捲到最下面，檔案的最後一行應該是「檔案結束」那行註解。它後面如果多了 `*/` 之類的東西（有些編輯器貼上時會自動補），整個刪掉再存檔。
 4. 右上角點「**部署**」→「**新增部署作業**」（Deploy → New deployment）。
    - 左邊齒輪「選取類型」選「**網頁應用程式**」（Web app）
    - 「執行身分」選「**我**」（Execute as: Me）

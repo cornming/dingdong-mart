@@ -1,17 +1,19 @@
 /**
  * @OnlyCurrentDoc
- * （上面這一行讓這支程式只能存取它所在的這一份試算表，不會碰到你帳號裡的其他檔案。）
  */
-
-/* 叮咚！便利店 — 線上排行榜與留言板的後端
- * 這是 Google Apps Script，綁在一份 Google 試算表上：玩家的成績寫進「scores」分頁，留言寫進「comments」分頁。
- * 安裝方式見 docs/LEADERBOARD.md。部署時「執行身分」選自己、「誰可以存取」選所有人。
- *
- * 管理：
- *   - 刪掉假成績：直接在 scores 分頁刪掉那一列。
- *   - 藏起不當留言：在 comments 分頁那一列的「隱藏」欄填任何字（例如 1），或直接刪列。
- *
- * 注意：成績是玩家的瀏覽器送來的，這裡只能擋掉明顯不合理的數字，擋不住有心造假。 */
+// ↑ 上面三行讓這支程式只能存取它所在的這一份試算表，不會碰到你帳號裡的其他檔案。請保留。
+//
+// 叮咚！便利店 — 線上排行榜與留言板的後端
+// 這是 Google Apps Script，綁在一份 Google 試算表上：玩家的成績寫進「scores」分頁，留言寫進「comments」分頁。
+// 安裝方式見 docs/LEADERBOARD.md。部署時「執行身分」選自己、「誰可以存取」選所有人。
+//
+// 管理：
+//   - 刪掉假成績：直接在 scores 分頁刪掉那一列。
+//   - 藏起不當留言：在 comments 分頁那一列的「隱藏」欄填任何字（例如 1），或直接刪列。
+//
+// 注意：成績是玩家的瀏覽器送來的，這裡只能擋掉明顯不合理的數字，擋不住有心造假。
+//
+// 這個檔案除了最上面三行之外，刻意只用「//」註解：有些編輯器在貼上時會自動補一個「*/」，造成語法錯誤。
 
 var CONFIG = {
   TOP: 10,                 // 排行榜顯示幾名
@@ -61,11 +63,11 @@ function rows_(sh) {
   var all = sh.getDataRange().getValues();
   return all.length > 1 ? all.slice(1) : [];
 }
-/** 整理玩家輸入的文字：去掉控制字元、把連續空白變成一個、裁到上限。 */
+// 整理玩家輸入的文字：去掉控制字元、把連續空白變成一個、裁到上限。
 function clean_(s, max) {
   return String(s == null ? '' : s).replace(/[\u0000-\u001f\u007f\u200b-\u200f\u2028-\u202e]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
 }
-/** 玩家的文字一律以「純文字」寫進試算表（前面加單引號），不讓它被當成公式、日期或數字。 */
+// 玩家的文字一律以「純文字」寫進試算表（前面加單引號），不讓它被當成公式、日期或數字。
 function cell_(s) {
   return "'" + s;
 }
@@ -77,7 +79,7 @@ function time_(v) {
   return v && v.getTime ? v.getTime() : (Number(v) || 0);
 }
 
-/** 節流：全站每分鐘的寫入上限，加上每台裝置的冷卻時間。 */
+// 節流：全站每分鐘的寫入上限，加上每台裝置的冷卻時間。
 function throttle_(cid) {
   var cache = CacheService.getScriptCache();
   var minute = 'w:' + Math.floor(Date.now() / 60000);
@@ -146,3 +148,4 @@ function addComment_(b) {
   sheet_('comments', COMMENT_HEAD).appendRow([new Date(), cell_(name), cell_(text), clean_(b.v, 12), clean_(b.cid, 40), '']);
   return board_();
 }
+// ===== 檔案結束：這一行之後不應該有任何東西 =====
