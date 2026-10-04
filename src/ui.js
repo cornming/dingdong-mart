@@ -741,6 +741,6 @@
   root.DD_UI = { state: function () { return S; }, ui: ui, tick: doTick, act: ACT };
 
   renderTitle();
-  if (document.fonts && document.fonts.load) document.fonts.load('12px "Cubic 11"');
+  if (document.fonts && document.fonts.load) document.fonts.load('15px "Huninn"');
   requestAnimationFrame(frame);
 })(typeof globalThis !== 'undefined' ? globalThis : this);
