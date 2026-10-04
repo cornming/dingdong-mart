@@ -833,7 +833,7 @@
     s.cash -= f.cost;
     s.slots[slot] = type;
     if (first) D.PRODUCTS.forEach(function (p) { if (p.fx === type && s.target[p.id] === 0) s.target[p.id] = Math.round(f.cap * 0.5 / 10) * 10; });
-    return ok(first ? f.name + '裝好了！商品明早到貨，也可以到「進貨」按緊急補貨。' : '多了一台' + f.name + '，可以放更多貨了。');
+    return ok(first ? f.name + '裝好了！商品明早到貨，也可以到「進貨」按「立刻到貨」。' : '多了一台' + f.name + '，可以放更多貨了。');
   }
   function sellFixture(s, slot) {
     const type = s.slots[slot];
@@ -848,6 +848,17 @@
       if (s.target[p.id] > c) s.target[p.id] = c;
     });
     return ok(f.name + '以半價 ' + money(f.cost * 0.5) + ' 賣掉了。');
+  }
+  /** 搬設備：搬到空位，或跟另一台互換位置。不花錢，庫存與進貨設定都不變。 */
+  function moveFixture(s, from, to) {
+    const type = s.slots[from];
+    if (!type) return no('這裡沒有設備可以搬');
+    if (from === to) return no('它本來就在這裡');
+    if (unlockedSlots(s).indexOf(to) < 0) return no('那個位置要先擴建店面才能使用');
+    const other = s.slots[to];
+    s.slots[to] = type;
+    s.slots[from] = other || null;
+    return ok(other ? D.FIXTURES[type].name + '和' + D.FIXTURES[other].name + '換了位置。' : D.FIXTURES[type].name + '搬好了。');
   }
   function setTarget(s, pid, n) {
     if (!P[pid]) return no('沒有這項商品');
@@ -943,7 +954,7 @@
     carriedList: carriedList, attract: attract, share: share, shares: shares, rentOf: rentOf, powerOf: powerOf,
     crewOn: crewOn, isOpen: isOpen, staffOnShift: staffOnShift, netWorth: netWorth, inventoryValue: inventoryValue,
     suggest: suggest, rushCost: rushCost, lambdaAt: lambdaAt, money: money,
-    buyFixture: buyFixture, sellFixture: sellFixture, setTarget: setTarget, setPrice: setPrice, rushOrder: rushOrder,
+    buyFixture: buyFixture, sellFixture: sellFixture, moveFixture: moveFixture, setTarget: setTarget, setPrice: setPrice, rushOrder: rushOrder,
     applySuggestions: applySuggestions, hire: hire, fireStaff: fireStaff, setShift: setShift, setOwnerShift: setOwnerShift,
     buyUpgrade: buyUpgrade, expand: expand, runAd: runAd,
   };

@@ -36,6 +36,7 @@
 - [第 4 圈：畫面改版成現代便利商店](loop/04-redesign.md)
 - [第 5 圈：玩家回饋——進貨、連鎖、音樂、速度](loop/05-feedback.md)
 - [第 6 圈：線上排行榜與留言板](loop/06-leaderboard.md)
+- [第 7 圈：設備可以搬移](loop/07-move-fixtures.md)
 
 ## 下一圈候選
 

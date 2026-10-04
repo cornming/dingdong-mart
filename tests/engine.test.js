@@ -154,6 +154,36 @@ test('玩家操作的檢查', () => {
   assert.ok(E.unlockedSlots(s).length > D.LEVELS[lv].slots);
 });
 
+test('搬設備：搬到空位或互換，不花錢，庫存、容量、進貨設定都不變', () => {
+  const s = fresh();
+  s.cash = 500000;
+  E.buyFixture(s, 2, 'coffee');
+  const snap = () => JSON.stringify([s.cash, s.stock, s.target, s.price, D.PRODUCTS.map((p) => E.cap(s, p.id))]);
+  const before = snap();
+  assert.equal(E.moveFixture(s, 3, 5).ok, false, '空位沒有東西可以搬');
+  assert.equal(E.moveFixture(s, 0, 0).ok, false, '搬到原地不算');
+  assert.equal(E.moveFixture(s, 0, 4).ok, false, '不能搬到還沒擴建的位置');
+  assert.equal(E.moveFixture(s, 0, 99).ok, false);
+  assert.deepEqual(s.slots.slice(0, 3), ['shelf', 'fridge', 'coffee']);
+
+  assert.equal(E.moveFixture(s, 0, 6).ok, true);           // 搬到空位
+  assert.equal(s.slots[0], null);
+  assert.equal(s.slots[6], 'shelf');
+  const sw = E.moveFixture(s, 1, 2);                         // 互換
+  assert.equal(sw.ok, true);
+  assert.match(sw.msg, /換了位置/);
+  assert.deepEqual([s.slots[1], s.slots[2]], ['coffee', 'fridge']);
+  assert.equal(snap(), before, '搬來搬去之後，錢、庫存、容量、進貨設定都跟原本一樣');
+  assert.equal(E.fixtureCount(s, 'shelf'), 1);
+  assert.equal(E.buyFixture(s, 0, 'rack').ok, true, '搬走之後空出來的位置可以放新設備');
+  assert.deepEqual(JSON.parse(JSON.stringify(s)), s);
+  // 搬設備不影響營業結果：同一個種子，搬過與沒搬過的店一天下來完全一樣
+  const a = fresh('kh2', 31), b = fresh('kh2', 31);
+  E.moveFixture(b, 0, 5); E.moveFixture(b, 1, 3);
+  const ra = runDay(a).report, rb = runDay(b).report;
+  assert.deepEqual([ra.rev, ra.profit, ra.customers], [rb.rev, rb.profit, rb.customers]);
+});
+
 test('緊急補貨：補到目標量，並多收運費', () => {
   const s = fresh();
   s.stock.tea = 10;

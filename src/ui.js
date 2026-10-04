@@ -31,7 +31,7 @@
   let scene = null;
   const ui = { screen: 'title', speed: 1, paused: true, sheet: null, slotSel: null, modal: null, acc: 0, last: 0,
     cityId: null, locId: null, tick: '', closedNote: -1, toastTimer: null, hoursBy: {}, stockQ: '', stockCat: 'all',
-    lastBg: [], milestone: false, branchMode: false };
+    lastBg: [], milestone: false, branchMode: false, moveFrom: null };
   const pref = { sfx: true, music: true, tutorial: false, best: {}, hall: [], nick: '' };
   function hoursOf() { return (CH && ui.hoursBy[CH.active]) || []; }
 
@@ -390,23 +390,29 @@
     const unlocked = E.unlockedSlots(S);
     if (ui.slotSel == null) { ui.slotSel = unlocked.filter(function (i) { return !S.slots[i]; })[0]; if (ui.slotSel == null) ui.slotSel = 0; }
     const rows = [[0, 1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11]];
-    let html = '<p class="note">' + D.LEVELS[S.level].name + '・點一個位置來買或賣設備。同一種設備買第二台，可以放的貨就加倍。</p><div class="floor">';
+    if (ui.moveFrom != null && !S.slots[ui.moveFrom]) ui.moveFrom = null;
+    const moving = ui.moveFrom != null;
+    let html = moving
+      ? '<p class="note"><b>要把' + D.FIXTURES[S.slots[ui.moveFrom]].name + '搬到哪裡？</b>點下面亮起來的位置：空位直接搬過去，已經有設備的位置會互換。搬移不用錢。</p><div class="floor moving">'
+      : '<p class="note">' + D.LEVELS[S.level].name + '・點一個位置來買、賣或搬設備。同一種設備買第二台，可以放的貨就加倍。</p><div class="floor">';
     rows.forEach(function (row, ri) {
       html += '<div class="floor-row r' + ri + '">';
       row.forEach(function (i) {
         const f = S.slots[i], lock = unlocked.indexOf(i) < 0;
-        html += '<button class="slot' + (i === ui.slotSel ? ' on' : '') + (lock ? ' lock' : f ? ' has' : '') + '" data-act="slot" data-i="' + i + '">' + (lock ? '未擴建' : f ? D.FIXTURES[f].name : '空位') + '</button>';
+        const cls = moving ? (i === ui.moveFrom ? ' from' : lock ? '' : ' to') : (i === ui.slotSel ? ' on' : '');
+        html += '<button class="slot' + cls + (lock ? ' lock' : f ? ' has' : '') + '" data-act="slot" data-i="' + i + '"' + (moving && !lock && i !== ui.moveFrom ? ' aria-label="搬到這裡：' + (f ? '跟' + D.FIXTURES[f].name + '互換' : '空位') + '"' : '') + '>' + (lock ? '未擴建' : f ? D.FIXTURES[f].name : '空位') + '</button>';
       });
       html += '</div>';
     });
     html += '<div class="floor-door">櫃台　　　　　　　大門</div></div>';
+    if (moving) return html + '<button class="btn wide" data-act="moveCancel">先不搬了</button>';
     const i = ui.slotSel, f = S.slots[i], lock = unlocked.indexOf(i) < 0;
     if (lock) {
       html += '<div class="card"><p>這個位置要先擴建店面才能使用。</p></div>';
     } else if (f) {
       const fx = D.FIXTURES[f];
       html += '<div class="card"><h4>' + fx.name + '</h4><p>' + fx.desc + '。每日電費 ' + money(fx.power) + '。</p>' + demandHint(f) +
-        '<button class="btn" data-act="sellFx">半價賣掉（拿回 ' + money(fx.cost / 2) + '）</button></div>';
+        '<div class="btnrow"><button class="btn primary" data-act="moveFx">搬到別的位置</button><button class="btn" data-act="sellFx">半價賣掉（拿回 ' + money(fx.cost / 2) + '）</button></div></div>';
     } else {
       html += '<h3 class="grp">這個空位要放什麼？</h3>';
       D.FIXTURE_ORDER.forEach(function (k) {
@@ -718,7 +724,7 @@
       '<li><b>按「×1」開始營業。</b>客人會走進來找想買的東西，買不到會不開心。</li>' +
       '<li><b>店面下方的長條</b>是今天每小時的人潮：橘色是已經來的客人，藍色是預估，斜紋代表那一班沒人顧店。</li>' +
       '<li><b>進貨：</b>設定每種商品要「補到」幾個、賣多少錢。貨車每天<b>清晨 06:00</b> 送到；等不及可以按「立刻到貨」，馬上上架但多收三成運費。鮮食和報紙賣不完當天就報廢。</li>' +
-      '<li><b>設備：</b>買了冷藏櫃才能賣飲料、買了鮮食櫃才能賣便當。看每天結算的建議決定先買什麼。</li>' +
+      '<li><b>設備：</b>買了冷藏櫃才能賣飲料、買了鮮食櫃才能賣便當。看每天結算的建議決定先買什麼。擺好的設備可以免費搬到別的位置或互換。</li>' +
       '<li><b>店員：</b>三個班都要有人，店才會 24 小時營業。</li>' +
       '<li><b>宣傳：</b>口碑和廣告決定你從對手那裡搶到多少客人。</li>' +
       '<li><b>音樂：</b>早班、晚班、大夜各有一首，聽到音樂變了就是換班了。</li>' +
@@ -918,7 +924,7 @@
       if (i === CH.active || !C.switchTo(CH, i).ok) return;
       S = C.cur(CH);
       scene.setState(S);
-      ui.sheet = null; ui.slotSel = null; ui.closedNote = -1;
+      ui.sheet = null; ui.slotSel = null; ui.moveFrom = null; ui.closedNote = -1;
       renderSheet();
       say('來到' + S.name + '（' + E.LOC[S.locId].name + '）。' + (S.lastReport && S.lastReport.tips[0] ? S.lastReport.tips[0] : ''));
       AU.click();
@@ -967,9 +973,10 @@
     tab: function (el) {
       const t = el.getAttribute('data-tab');
       ui.sheet = ui.sheet === t ? null : t;
+      ui.moveFrom = null;
       renderSheet();
     },
-    closeSheet: function () { ui.sheet = null; renderSheet(); },
+    closeSheet: function () { ui.sheet = null; ui.moveFrom = null; renderSheet(); },
     menu: function () { showMenu(); },
     closeModal: function () { closeModal(); },
     howto: function () { showHowto(); },
@@ -1009,7 +1016,19 @@
     },
     rush: function (el) { afterAction(E.rushOrder(S, el.closest('.prod').getAttribute('data-pid'))); },
     applySuggest: function () { afterAction(E.applySuggestions(S)); },
-    slot: function (el) { ui.slotSel = +el.getAttribute('data-i'); AU.click(); renderSheet(true); },
+    slot: function (el) {
+      const i = +el.getAttribute('data-i');
+      if (ui.moveFrom != null) {
+        if (i === ui.moveFrom) { ui.moveFrom = null; AU.click(); renderSheet(true); return; }
+        const res = E.moveFixture(S, ui.moveFrom, i);
+        if (res.ok) { ui.moveFrom = null; ui.slotSel = i; }
+        afterAction(res);
+        return;
+      }
+      ui.slotSel = i; AU.click(); renderSheet(true);
+    },
+    moveFx: function () { if (S.slots[ui.slotSel]) { ui.moveFrom = ui.slotSel; AU.click(); renderSheet(true); } },
+    moveCancel: function () { ui.moveFrom = null; AU.click(); renderSheet(true); },
     buyFx: function (el) { afterAction(E.buyFixture(S, ui.slotSel, el.getAttribute('data-k'))); },
     sellFx: function () { confirmBox('賣掉只能拿回半價，放不下的庫存也會一起清掉。', 'sellFxConfirmed'); },
     sellFxConfirmed: function () { closeModal(); afterAction(E.sellFixture(S, ui.slotSel)); },
