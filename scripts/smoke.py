@@ -328,9 +328,10 @@ with sync_playwright() as p:
     page.wait_for_timeout(300)
     shot('13-desktop')
 
-    # 還沒設定後端網址時（repo 的預設狀態）：只顯示本機紀錄，不會發出任何連線
+    # 後端網址留空時：只顯示本機紀錄，不會發出任何連線
     ctx2 = browser.new_context(viewport={'width': 390, 'height': 700})
     ctx2.route('**/fonts.googleapis.com/**', lambda r: r.fulfill(status=200, content_type='text/css', body=''))
+    ctx2.add_init_script("window.DD_CONFIG = { api: '' };")
     page2 = ctx2.new_page()
     reqs = []
     page2.on('request', lambda r: reqs.append(r.url) if r.url.startswith('http') and 'fonts.googleapis' not in r.url else None)

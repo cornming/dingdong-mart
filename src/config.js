@@ -3,6 +3,6 @@
  *      留空白就只有這台裝置自己的名人堂。安裝方式見 docs/LEADERBOARD.md。 */
 (function (root) {
   root.DD_CONFIG = root.DD_CONFIG || {
-    api: '',
+    api: 'https://script.google.com/macros/s/AKfycbwdXwYpk3tu-4aR967sVkkfMSBMD8vR_C_5iQshU1SilcPudUZgdGDHsXs9ecs4gNaV/exec',
   };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
