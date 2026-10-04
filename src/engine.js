@@ -937,7 +937,7 @@
 
   const API = {
     D: D, P: P, LOC: LOC, OWNER: OWNER, OVERDRAFT: OVERDRAFT, MAX_PER_SHIFT: MAX_PER_SHIFT,
-    newGame: newGame, tickHour: tickHour, resolveEvent: resolveEvent,
+    newGame: newGame, tickHour: tickHour, resolveEvent: resolveEvent, EVENT_IDS: Object.keys(EV),
     clockOf: clockOf, shiftOf: shiftOf, weekdayOf: weekdayOf, isWeekend: isWeekend, seasonOf: seasonOf,
     fixtureCount: fixtureCount, cap: cap, unlockedSlots: unlockedSlots, unitPrice: unitPrice, unitCost: unitCost,
     carriedList: carriedList, attract: attract, share: share, shares: shares, rentOf: rentOf, powerOf: powerOf,
