@@ -23,13 +23,13 @@
   let S = null;
   let scene = null;
   const ui = { screen: 'title', speed: 1, paused: true, sheet: null, slotSel: null, modal: null, acc: 0, last: 0,
-    cityId: null, locId: null, tick: '', closedNote: -1, toastTimer: null };
-  const pref = { sfx: true, music: true, tutorial: false };
+    cityId: null, locId: null, tick: '', closedNote: -1, toastTimer: null, hours: [] };
+  const pref = { sfx: true, music: true, tutorial: false, best: {} };
 
   /* ---------- 存檔 ---------- */
   function store(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); return true; } catch (e) { return false; } }
   function fetchStored(key) { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : null; } catch (e) { return null; } }
-  function save() { return S && !S.over ? store(SAVE_KEY, { state: S, speed: ui.speed, at: Date.now() }) : false; }
+  function save() { return S && !S.over ? store(SAVE_KEY, { state: S, speed: ui.speed, hours: ui.hours, at: Date.now() }) : false; }
   function loadSave() {
     const sv = fetchStored(SAVE_KEY);
     return sv && sv.state && sv.state.v === 1 && E.LOC[sv.state.locId] ? sv : null;
@@ -37,7 +37,7 @@
   function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* 沒有儲存空間就算了 */ } }
   (function () {
     const p = fetchStored(PREF_KEY);
-    if (p) { pref.sfx = p.sfx !== false; pref.music = p.music !== false; pref.tutorial = !!p.tutorial; }
+    if (p) { pref.sfx = p.sfx !== false; pref.music = p.music !== false; pref.tutorial = !!p.tutorial; pref.best = p.best && typeof p.best === 'object' ? p.best : {}; }
     AU.setSfx(pref.sfx); AU.setMusic(pref.music);
   })();
   function savePref() { store(PREF_KEY, pref); }
@@ -107,7 +107,8 @@
     const loc = E.LOC[ui.locId];
     let pins = '';
     locs.forEach(function (l) {
-      pins += '<button class="pin' + (l.id === ui.locId ? ' on' : '') + '" style="left:' + l.x + '%;top:' + l.y + '%" data-act="loc" data-id="' + l.id + '"><i></i><span>' + l.name + '</span></button>';
+      const best = pref.best[l.id] | 0;
+      pins += '<button class="pin' + (l.id === ui.locId ? ' on' : '') + (best ? ' won' : '') + '" style="left:' + l.x + '%;top:' + l.y + '%" data-act="loc" data-id="' + l.id + '"><i></i><span>' + l.name + (best ? '・' + ['', '銅', '銀', '金'][best] : '') + '</span></button>';
     });
     let mix = '';
     Object.keys(D.SEGMENTS).forEach(function (k) {
@@ -120,7 +121,7 @@
     app.innerHTML =
       '<div class="pick"><div class="win"><div class="awning"></div><h2>' + city.name + '・挑一個店面</h2><div class="win-body">' +
         '<div class="map map-' + ui.cityId + '">' + pins + '</div>' +
-        '<div class="locinfo"><h3>' + loc.name + '<span class="tag">' + loc.kind + '</span></h3>' +
+        '<div class="locinfo"><h3>' + loc.name + '<span class="tag">' + loc.kind + '</span>' + (pref.best[loc.id] ? '<span class="tag best">拿過' + MEDALS[pref.best[loc.id]].slice(0, 2) + '</span>' : '') + '</h3>' +
           '<div class="kv"><span>每日店租</span><b>' + money(loc.rent) + '</b><span>商圈人潮</span><b>' + trafficWord(loc.traffic) + '</b>' +
           '<span>週末人潮</span><b>' + (loc.weekend > 1.15 ? '比平日多' : loc.weekend < 0.85 ? '比平日少很多' : '跟平日差不多') + '</b><span>同業對手</span><b>' + rivals + '</b></div>' +
           mix +
@@ -140,11 +141,12 @@
       '<div class="game">' +
         '<header class="hud">' +
           '<div class="hud-row"><div class="hud-date"><b id="hDay"></b><span id="hClock" class="clock"></span></div>' +
-            '<div class="hud-wx" id="hWx"></div><button class="icon-btn" data-act="menu" aria-label="選單">≡</button></div>' +
+            '<div class="hud-wx" id="hWx"></div><button class="icon-btn" data-act="menu">選單</button></div>' +
           '<div class="hud-row"><div class="lcd" id="hCash"></div><div class="hud-rep">口碑<b id="hRep"></b></div>' +
             '<button class="hud-goal" data-act="tab" data-tab="report"><span id="hGoalTxt"></span><span class="meter gold"><i id="hGoalBar"></i></span></button></div>' +
         '</header>' +
         '<div class="stage" id="stage"><canvas id="scene" aria-label="店面"></canvas></div>' +
+        '<button class="dayline" id="dayline" data-act="tab" data-tab="staff" aria-label="今天每小時的來客數與三個班的人手，點一下去排班"></button>' +
         '<div class="advisor"><img class="mascot" alt="顧問咚咚" src="' + SC.mascot() + '"><p id="tick" aria-live="polite"></p></div>' +
         '<div class="controls"><div class="speed" role="group" aria-label="遊戲速度">' +
           '<button data-act="speed" data-v="0">暫停</button><button data-act="speed" data-v="1">×1</button><button data-act="speed" data-v="2">×3</button><button data-act="speed" data-v="3">×8</button></div>' +
@@ -165,6 +167,33 @@
     const scale = Math.min(st.clientWidth / 192, st.clientHeight / 160);
     cv.style.width = Math.floor(192 * scale) + 'px';
     cv.style.height = Math.floor(160 * scale) + 'px';
+  }
+  /* 今日時間軸：24 根長條代表每小時來客（過去＝實際、未來＝預估），下面是三個班的人手。 */
+  function updateDayline() {
+    const el = $('#dayline');
+    if (!el) return;
+    const exp = [];
+    let max = 12;
+    for (let t = 0; t < 24; t++) {
+      const lam = E.lambdaAt(S, E.clockOf(t));
+      exp.push(lam);
+      const rec = ui.hours[t];
+      max = Math.max(max, t < S.t && rec ? rec.n : lam);
+    }
+    let h = '<span class="dl-bars">';
+    for (let t = 0; t < 24; t++) {
+      const past = t < S.t, rec = ui.hours[t];
+      const open = past && rec ? rec.open !== false : E.isOpen(S, E.shiftOf(t));
+      const v = past && rec ? rec.n : exp[t];
+      h += '<i class="' + (past ? 'dl-past' : 'dl-next') + (open ? '' : ' dl-shut') + (t === S.t ? ' dl-now' : '') + '" style="height:' + Math.max(7, Math.round(v / max * 100)) + '%"></i>';
+    }
+    h += '</span><span class="dl-shifts">';
+    const cur = E.shiftOf(Math.min(S.t, 23));
+    D.SHIFTS.forEach(function (sh, i) {
+      const n = E.crewOn(S, i).length;
+      h += '<span class="' + (E.isOpen(S, i) ? 'dl-ok' : 'dl-empty') + (cur === i ? ' dl-cur' : '') + '">' + sh.name + '　' + (S.closedToday ? '休息' : n ? n + ' 人' : '沒人顧') + '</span>';
+    });
+    el.innerHTML = h + '</span>';
   }
   function goalInfo() {
     const city = D.CITIES[S.cityId];
@@ -192,6 +221,7 @@
     $('#hGoalBar').style.width = Math.max(3, Math.min(100, g.pct)) + '%';
     const td = S.today;
     $('#today').textContent = '來客 ' + td.customers + '・營收 ' + money(td.rev);
+    updateDayline();
     app.querySelectorAll('.speed button').forEach(function (b) {
       const v = +b.getAttribute('data-v');
       b.classList.toggle('on', ui.paused ? v === 0 : v === ui.speed);
@@ -479,6 +509,7 @@
   function showHowto() {
     openModal('<h2>怎麼玩</h2><div class="win-body"><ol class="howto">' +
       '<li><b>按「×1」開始營業。</b>客人會走進來找想買的東西，買不到會不開心。</li>' +
+      '<li><b>店面下方的長條</b>是今天每小時的人潮：橘色是已經來的客人，藍色是預估，斜紋代表那一班沒人顧店。</li>' +
       '<li><b>進貨：</b>設定每種商品明天要補到幾個、賣多少錢。鮮食和報紙賣不完當天就報廢。</li>' +
       '<li><b>設備：</b>買了冷藏櫃才能賣飲料、買了鮮食櫃才能賣便當。看每天結算的建議決定先買什麼。</li>' +
       '<li><b>店員：</b>三個班都要有人，店才會 24 小時營業。</li>' +
@@ -519,9 +550,11 @@
     D.PRODUCTS.forEach(function (p) { before[p.id] = S.stock[p.id]; });
     const noteKey = S.day * 3 + E.shiftOf(S.t);
     const shiftName = D.SHIFTS[E.shiftOf(S.t)].name;
+    const hour = S.t;
     const res = E.tickHour(S);
     if (res.event) { showEvent(res.event); return; }
     if (res.blocked) return;
+    if (res.dayEnded) ui.hours = []; else ui.hours[hour] = { n: res.n, open: res.open };
     if (res.visits && res.visits.length) { scene.addVisits(res.visits, SPEED_MS[ui.speed]); AU.ding(); }
     // 跑馬燈
     let msg = res.msgs && res.msgs[0];
@@ -563,14 +596,15 @@
   }
 
   /* ---------- 開始、繼續 ---------- */
-  function startGame(state, speed) {
+  function startGame(state, speed, hours, greet) {
     S = state;
+    ui.hours = Array.isArray(hours) ? hours : [];
     ui.speed = speed || 1;
     ui.paused = true;
     ui.sheet = null;
     ui.slotSel = null;
     ui.acc = 0;
-    ui.tick = '';
+    ui.tick = greet || '';
     renderGame();
   }
   function afterAction(res, rerender) {
@@ -588,12 +622,14 @@
       renderCity();
     },
     newConfirmed: function () { closeModal(); renderCity(); },
-    continue: function () { const sv = loadSave(); if (sv) startGame(sv.state, sv.speed); },
+    continue: function () { const sv = loadSave(); if (sv) startGame(sv.state, sv.speed, sv.hours, '歡迎回來，店長！第 ' + sv.state.day + ' 天，按「×1」繼續營業。'); },
     city: function (el) { ui.cityId = el.getAttribute('data-id'); ui.locId = null; renderLoc(); },
     loc: function (el) { ui.nameDraft = $('#storeName').value; ui.locId = el.getAttribute('data-id'); renderLoc(); },
     start: function () {
       const name = ($('#storeName').value || '').trim() || '叮咚便利店';
-      const st = E.newGame({ locId: ui.locId, name: name, seed: (Date.now() % 2147483647) | 0 });
+      // 網址加上 ?seed=數字 可以指定亂數種子（自動化測試用，讓每次結果一樣）
+      const fixed = /[?&]seed=(\d+)/.exec(root.location ? root.location.search : '');
+      const st = E.newGame({ locId: ui.locId, name: name, seed: fixed ? +fixed[1] : (Date.now() % 2147483647) | 0 });
       startGame(st, 1);
       save();
       showTutorial(0);
@@ -637,7 +673,10 @@
       closeModal();
       say('第 ' + S.day + ' 天，' + D.WEATHER[S.weather].name + '。' + (S.lastReport && S.lastReport.tips[0] ? S.lastReport.tips[0] : ''));
       if (S.over === 'bankrupt') showBankrupt();
-      else if (S.lastReport && S.lastReport.goal) showResult();
+      else if (S.lastReport && S.lastReport.goal) {
+        if ((pref.best[S.locId] | 0) < S.medal.tier) { pref.best[S.locId] = S.medal.tier; savePref(); }
+        showResult();
+      }
       updateHud();
     },
     price: function (el) {

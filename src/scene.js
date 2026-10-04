@@ -382,7 +382,9 @@
     const R = function (x, y, w, h, c) { ctx.fillStyle = c; ctx.fillRect(Math.round(x), Math.round(y), w, h); };
     R(0, 0, TW, TH, '#16224f'); R(0, 0, TW, 40, '#0d1638');
     for (let i = 0; i < 28; i++) { const tw = (Math.floor(now / 500) + i) % 5 === 0; R((i * 53) % TW, (i * 29) % 46, 1, 1, tw ? '#ffffff' : '#7f8fc9'); }
-    R(160, 8, 10, 10, '#ffe08a'); R(163, 8, 7, 7, '#0d1638');
+    ['...###...', '.####....', '.###.....', '###......', '###......', '###......', '.###.....', '.####....', '...###...'].forEach(function (row, r) {
+      for (let i = 0; i < row.length; i++) if (row[i] === '#') R(160 + i, 8 + r, 1, 1, '#ffe08a');
+    });
     // 遠方大樓
     [[0, 36, 30], [26, 22, 44], [70, 30, 36], [122, 26, 40], [148, 44, 26], [176, 18, 48]].forEach(function (b, bi) {
       R(b[0], 88 - b[2], b[1], b[2], '#243474');
