@@ -1,4 +1,6 @@
-/* 建置：把 index.html 參照的樣式、程式與字型全部內嵌成單一檔案 dist/index.html。
+/* 建置：把 index.html 參照的樣式與程式全部內嵌成單一檔案 dist/index.html。
+ * （字型「粉圓」由 Google Fonts 載入；沒有網路時會改用裝置內建的黑體，版面不受影響。
+ *   樣式裡如果有本機的 .woff2 字型，也會一併內嵌。）
  * 這個檔案可以直接丟到任何靜態空間（GitHub Pages）、或用手機瀏覽器離線開啟。
  * 用法：node scripts/build.js */
 'use strict';

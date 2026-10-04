@@ -2,7 +2,7 @@
 
 一九九九年的夏天，你頂下了巷口的一間小店。進貨、排班、對付奧客，把它變成整條街最亮的招牌。
 
-這是一款向九〇年代末台灣便利商店經營遊戲致敬的**原創**網頁遊戲：玩法、程式、美術、音樂都是重新做的，沒有使用任何原作的名稱、素材或角色。手機直式畫面優先，桌機也能玩。
+這是一款向九〇年代末台灣便利商店經營遊戲致敬的**原創**網頁遊戲：玩法是當年的味道，畫面是現在的便利商店。程式、美術、音樂都是重新做的，沒有使用任何原作或現有連鎖品牌的名稱、素材或識別。手機直式畫面優先，桌機也能玩。
 
 - 線上玩：<https://cornming.github.io/dingdong-mart/>（需要先在 repo 的 Settings → Pages 把 Source 設為 GitHub Actions）
 - 離線玩：執行 `npm run build`，用瀏覽器打開 `dist/index.html`（單一檔案，可以直接傳到手機）
@@ -24,7 +24,7 @@
 |---|---|
 | `src/data.js` | 純資料：商品、設備、客層、城市與店面、天氣、廣告 |
 | `src/engine.js` | 遊戲規則（純邏輯、沒有 DOM，瀏覽器與 Node 共用） |
-| `src/scene.js` | 像素風店面與標題畫面（canvas） |
+| `src/scene.js` | 店面與標題畫面（canvas 向量繪圖，現代便利商店風格） |
 | `src/audio.js` | 音效與背景音樂（WebAudio 即時合成，沒有音檔） |
 | `src/ui.js`、`src/styles.css` | 操作介面 |
 | `src/version.js` | 遊戲內顯示的版本與更新紀錄（自動產生） |
@@ -63,4 +63,4 @@ npm run verify      # 以上全部
 
 ## 字型
 
-介面使用點陣字型 Cubic 11，依 SIL Open Font License 1.1 授權，授權全文在 `assets/fonts/Cubic_11-OFL.txt`。
+介面使用 justfont 的開源圓體「粉圓」（Huninn，SIL Open Font License 1.1），從 Google Fonts 載入。沒有網路時會改用裝置內建的黑體，版面不受影響。
