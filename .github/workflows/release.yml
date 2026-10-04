@@ -1,0 +1,73 @@
+name: 發佈
+
+# 推到 main：先過三道驗證 → 依 commit 訊息自動升版、寫更新紀錄、打標籤、建立 Release → 部署到 GitHub Pages。
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: verify
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.rel.outputs.version }}
+      released: ${{ steps.rel.outputs.released }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 依 commit 訊息決定版號並更新紀錄
+        id: rel
+        run: node scripts/release.js
+      - name: 提交新版號
+        if: steps.rel.outputs.released == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json CHANGELOG.md src/version.js
+          git commit -m "chore(release): v${{ steps.rel.outputs.version }} [skip ci]"
+          git push origin HEAD:main
+      - name: 打標籤並建立 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v${{ steps.rel.outputs.version }}"
+          if ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            git tag "$tag"
+            git push origin "$tag"
+          fi
+          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --title "$tag" --notes-file dist/RELEASE_NOTES.md
+      - name: 建置單一檔案
+        run: |
+          rm -f dist/RELEASE_NOTES.md
+          node scripts/build.js
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  pages:
+    # 私有 repo 在免費方案不能用 Pages：公開 repo 會自動部署；私有 repo 要部署就把 repo 變數 ENABLE_PAGES 設為 true。
+    needs: release
+    if: ${{ !github.event.repository.private || vars.ENABLE_PAGES == 'true' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

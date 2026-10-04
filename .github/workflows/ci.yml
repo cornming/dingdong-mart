@@ -1,0 +1,39 @@
+name: 驗證
+
+# loop engineering 的三道驗證閘門：規則測試、平衡模擬、介面實測。
+# PR 會跑；推到 main 時由 release.yml 呼叫。
+on:
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 閘門一：規則測試
+        run: npm test
+      - name: 閘門二：平衡模擬（三種機器人玩家 × 12 個店面）
+        run: node scripts/balance.js --seeds 12
+      - name: 建置單一檔案
+        run: node scripts/build.js
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 安裝無頭瀏覽器
+        run: |
+          pip install playwright
+          python -m playwright install --with-deps chromium
+      - name: 閘門三：介面實測（對建置後的檔案）
+        run: python scripts/smoke.py shots dist/index.html
+      - name: 保留截圖
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: shots
+          if-no-files-found: ignore
