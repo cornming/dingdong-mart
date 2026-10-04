@@ -21,6 +21,8 @@ def check(cond, msg):
 with sync_playwright() as p:
     browser = p.chromium.launch()
     ctx = browser.new_context(viewport={'width': 390, 'height': 700}, device_scale_factor=2, has_touch=True)
+    # 網路字型在測試裡一律回空白樣式：沒有網路的環境也能跑，而且每次用同一套備用字型，截圖才比得起來
+    ctx.route('**/fonts.googleapis.com/**', lambda r: r.fulfill(status=200, content_type='text/css', body=''))
     page = ctx.new_page()
     page.on('pageerror', lambda e: errors.append(str(e)))
     page.on('console', lambda m: errors.append(m.text) if m.type == 'error' else None)
