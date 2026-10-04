@@ -18,7 +18,7 @@ jobs:
       - name: 閘門一：規則測試
         run: npm test
       - name: 閘門二：平衡模擬（三種機器人玩家 × 12 個店面）
-        run: node scripts/balance.js --seeds 12
+        run: node scripts/balance.js
       - name: 建置單一檔案
         run: node scripts/build.js
       - uses: actions/setup-python@v5
