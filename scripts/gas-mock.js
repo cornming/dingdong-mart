@@ -43,7 +43,9 @@ function load() {
     }) },
   };
   vm.createContext(sandbox);
-  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'backend', 'Code.gs'), 'utf8'), sandbox, { filename: 'Code.gs' });
+  // 設定環境變數 GAS_FILE 可以改測另一份檔案（例如被編輯器重新排版過的版本）
+  const file = process.env.GAS_FILE || path.join(__dirname, '..', 'backend', 'Code.gs');
+  vm.runInContext(fs.readFileSync(file, 'utf8'), sandbox, { filename: 'Code.gs' });
   return {
     sheets, clock, written, sandbox,
     get: () => JSON.parse(sandbox.doGet({ parameter: {} }).getContent()),

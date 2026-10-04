@@ -8,6 +8,13 @@ const C = require('../src/chain.js');
 const score = (o) => Object.assign({ action: 'score', name: '叮咚便利店', loc: '新堀江商圈', days: 140, rev: 6200000, stores: 1, worth: 3300000, v: '0.4.0', cid: 'a' }, o);
 const later = (g, sec) => { g.clock.now += (sec || 30) * 1000; };
 
+test('Code.gs 不含區塊註解（手機貼進 Apps Script 編輯器時，編輯器會自動補結尾而造成語法錯誤）', () => {
+  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'backend', 'Code.gs'), 'utf8');
+  assert.equal(src.indexOf('/*'), -1, '不可以出現區塊註解的開頭');
+  assert.equal(src.indexOf('*/'), -1, '不可以出現區塊註解的結尾');
+  assert.ok(!/`/.test(src), '也不用樣板字串，避免同類的自動補字問題');
+});
+
 test('空的排行榜；第一次讀取會自動建立分頁與標題列', () => {
   const g = load();
   const b = g.get();
