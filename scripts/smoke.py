@@ -49,7 +49,8 @@ with sync_playwright() as p:
                 return
 
     def no_overflow(where):
-        w = page.evaluate('Math.max(...[...document.querySelectorAll("#app *")].map(e => e.getBoundingClientRect().right))')
+        # 分類列與分店列本來就是可以左右捲動的長條，不算溢出
+        w = page.evaluate('Math.max(...[...document.querySelectorAll("#app *")].filter(e => !e.closest(".cats") && !e.closest(".stores")).map(e => e.getBoundingClientRect().right))')
         check(w <= 391, f'{where}：沒有橫向溢出（最右 {w:.0f}px）')
 
     shot('01-title')
@@ -115,6 +116,7 @@ with sync_playwright() as p:
     page.click('.tabs [data-tab=stock]')
     body = page.locator('#sheet .sheet-body')
     check('明天清晨 06:00' in page.locator('#stockSum').inner_text() and '還有' in page.locator('#stockSum').inner_text(), '進貨分頁寫明下一班貨車的時間與倒數')
+    check(page.locator('#mdCard').count() == 0, '還沒有鮮食櫃或熱食台時，不顯示即期品折扣')
     check(page.locator('.prod[data-pid=tea] .prod-eta').inner_text().strip() != '', '每項商品都標出明早會補多少')
     total = page.locator('.prod:visible').count()
     page.fill('#stockQ', '茶')
@@ -179,9 +181,49 @@ with sync_playwright() as p:
     page.click('.tabs [data-tab=equip]')
     check(page.locator('.floor.moving').count() == 0, '關掉分頁會離開搬移模式')
     check(page.evaluate('DD_UI.state().cash') == cash0, '搬設備不用錢')
+
+    # 設備：黃金位置（此時貨架在 1 號靠牆、冷藏櫃在 5 號櫃台旁、鮮食櫃在 2 號靠牆）
+    gold = lambda: page.evaluate('DD_UI.state().slots.map((f, i) => DD.isGold(DD_UI.state(), i))')
+    check(page.locator('.zones p').count() == 3 and '15%' in page.locator('.zones').inner_text(), '設備頁有三個分區的圖例，寫明多買一件的機率')
+    check(page.locator('.slot.gold').count() == 1 and page.locator('.slot.gold').get_attribute('data-i') == '2', '只有靠牆的鮮食櫃是黃金位置')
+    page.click('.slot[data-i="1"]')
+    check('黃金位置是「中島」' in page.locator('.goldline').inner_text(), '點貨架會說它的黃金位置在中島')
+    page.click('[data-act=moveFx]')
+    check(page.locator('.slot.gold').count() == 1 and page.locator('.slot.gold').get_attribute('data-i') == '6', '搬移時，適合它的空位標上星號')
+    page.click('.slot[data-i="6"]')
+    check(gold()[6] and '★ 黃金位置' in page.locator('.card .tag.best').inner_text(), '貨架搬到中島，變成黃金位置')
+    page.click('.slot[data-i="5"]')
+    page.click('[data-act=moveFx]')
+    page.click('.slot[data-i="1"]')
+    check(gold()[1] and page.locator('.slot.gold').count() == 3, '冷藏櫃搬回靠牆，三台設備都在黃金位置')
+    page.click('.slot[data-i="5"]')
+    first = page.locator('.card.buy h4').first.inner_text()
+    check('★ 適合這裡' in first and any(n in first for n in ['熱食台', '咖啡機', '冰沙機']), '空位的購買清單：適合這一區的設備排最前面並標示')
+    shot('06e-equip-gold')
+    no_overflow('設備（黃金位置）')
     page.click('[data-act=closeSheet]')
     page.wait_for_timeout(200)
     shot('06d-store-after-move')
+
+    # 進貨：即期品折扣（現在有鮮食櫃了）
+    page.click('.tabs [data-tab=stock]')
+    md = lambda: page.evaluate('DD.mdOf(DD_UI.state())')
+    check(page.locator('#mdCard').count() == 1 and md()['pct'] == 0 and '不打折' in page.locator('#mdCard').inner_text(), '有鮮食櫃之後出現即期品折扣，預設不打折')
+    check(page.locator('#mdCard .seg').count() == 0, '平常收成一行，不佔版面')
+    page.click('[data-act=mdToggle]')
+    page.click('#mdCard [data-k=pct][data-v="50"]')
+    check(md()['pct'] == 50 and '學會等' in page.locator('#mdCard').inner_text(), '選 5 折會警告客人會學會等')
+    page.click('#mdCard [data-k=pct][data-v="20"]')
+    page.click('#mdCard [data-k=at][data-v="22"]')
+    check(md() == {'at': 22, 'pct': 20} and '22:00' in page.locator('#mdCard').inner_text() and '學會等' not in page.locator('#mdCard').inner_text(), '改成 22:00 起 8 折，警告消失')
+    page.click('#mdCard [data-k=at][data-v="20"]')
+    check('20:00 起 8 折' in page.locator('.prod[data-pid=bento] .prod-foot').inner_text(), '便當那一列標出幾點起打幾折')
+    check('折' not in page.locator('.prod[data-pid=tea] .prod-foot').inner_text(), '不是即期品的商品不會標')
+    shot('06f-stock-markdown')
+    no_overflow('進貨（即期品折扣）')
+    page.click('[data-act=mdToggle]')
+    check(page.locator('#mdCard .seg').count() == 0 and '20:00 起 8 折' in page.locator('#mdCard').inner_text(), '收起後，那一行顯示目前的設定')
+    page.click('[data-act=closeSheet]')
     # 店員：請第一位應徵者上大夜
     page.click('.tabs [data-tab=staff]')
     page.click('[data-act=hire][data-i="0"][data-shift="2"]')
@@ -189,6 +231,17 @@ with sync_playwright() as p:
     shot('07-staff-after-hire')
     page.click('[data-act=closeSheet]')
     check(page.locator('#dayline .dl-bars i.dl-shut').count() == 0, '補上大夜班後，時間軸不再有不營業的時段')
+
+    # 時間走到 20:00：即期品開始打折
+    page.evaluate('() => { const s = DD_UI.state(); while (s.t < 14) { DD_UI.tick(); if (s.pending) DD.resolveEvent(s, 0); } }')
+    settle()
+    check('開始打 8 折' in page.locator('#tick').inner_text(), '20:00 顧問提醒即期品開始打折')
+    check(page.evaluate('DD.salePrice(DD_UI.state(), "bento")') == 44, '打折時段便當實際賣 44 元')
+    page.wait_for_timeout(250)
+    shot('06g-store-markdown')
+    page.click('.tabs [data-tab=stock]')
+    check('打折中' in page.locator('#mdCard').inner_text() and '現在賣 $44' in page.locator('.prod[data-pid=bento] .prod-foot').inner_text(), '進貨頁顯示正在打折與實際售價')
+    page.click('[data-act=closeSheet]')
 
     # 用測試掛鉤快轉三天，沿途處理事件與日結視窗
     reports = 0
@@ -208,6 +261,7 @@ with sync_playwright() as p:
                 page.wait_for_timeout(200)
                 shot('09-day-report')
                 no_overflow('日結視窗')
+                check('黃金位置多賣' in page.locator('#modal .extras').inner_text(), '日結寫出黃金位置多賣了幾件')
             page.click('[data-act=nextDay]')
         elif page.locator('[data-act=closeModal]').count():
             page.click('[data-act=closeModal]')
@@ -245,6 +299,13 @@ with sync_playwright() as p:
         ww = page.evaluate('Math.max(...[...document.querySelectorAll("#app *")].map(e => e.getBoundingClientRect().right))')
         check(ww <= w + 1, f'{w}×{h}：沒有橫向溢出（最右 {ww:.0f}px）')
         shot(f'14-small-{w}x{h}')
+    for tab in ['stock', 'equip']:
+        page.click(f'.tabs [data-tab={tab}]')
+        page.wait_for_timeout(150)
+        ww = page.evaluate('Math.max(...[...document.querySelectorAll("#app *")].filter(e => !e.closest(".cats") && !e.closest(".stores")).map(e => e.getBoundingClientRect().right))')
+        check(ww <= 321, f'320 寬的{"進貨" if tab == "stock" else "設備"}頁：沒有橫向溢出（最右 {ww:.0f}px）')
+        shot(f'14b-small-{tab}')
+    page.click('[data-act=closeSheet]')
     page.set_viewport_size({'width': 390, 'height': 700})
     page.wait_for_timeout(250)
 

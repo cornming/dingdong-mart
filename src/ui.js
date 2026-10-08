@@ -31,7 +31,7 @@
   let scene = null;
   const ui = { screen: 'title', speed: 1, paused: true, sheet: null, slotSel: null, modal: null, acc: 0, last: 0,
     cityId: null, locId: null, tick: '', closedNote: -1, toastTimer: null, hoursBy: {}, stockQ: '', stockCat: 'all',
-    lastBg: [], milestone: false, branchMode: false, moveFrom: null };
+    lastBg: [], milestone: false, branchMode: false, moveFrom: null, mdOpen: false };
   const pref = { sfx: true, music: true, tutorial: false, best: {}, hall: [], nick: '' };
   function hoursOf() { return (CH && ui.hoursBy[CH.active]) || []; }
 
@@ -283,6 +283,26 @@
       '<p>' + (n ? '照現在的設定，會補 <b>' + kinds + '</b> 種、共 <b>' + n + '</b> 件，約 <b>' + money(cost) + '</b>（以打烊時剩下的量為準）。' : '照現在的設定，明天不用補貨。') + '</p>' +
       '<p class="sub">「補到」是每天自動補貨的目標量，<b>明早才到</b>。等不及就按<b>立刻到貨</b>：馬上上架，但多收三成運費。明天預報 ' + wxChip(S.forecast, true) + '</p>';
   }
+  function zhe(pct) { return (10 - pct / 10) + ' 折'; }
+  /** 即期品折扣的設定卡（有鮮食櫃或熱食台才出現）。 */
+  function mdCard() {
+    if (!D.MARKDOWN.fixtures.some(function (f) { return E.fixtureCount(S, f) > 0; })) return '';
+    const m = E.mdOf(S), on = E.mdActive(S), habit = S.mdHabit || 0;
+    const state = !m.pct ? '不打折' : m.at + ':00 起 ' + zhe(m.pct) + (on ? '・打折中' : '');
+    let h = '<div class="card md" id="mdCard"><button class="mdhead" data-act="mdToggle" aria-expanded="' + (ui.mdOpen ? 'true' : 'false') + '"><b>即期品折扣</b>' +
+      '<span class="' + (on ? 'good' : '') + '">' + state + '</span>' + (habit >= 0.02 ? '<span class="bad">客人在等折扣</span>' : '') + '<i>' + (ui.mdOpen ? '收起' : '調整') + '</i></button>';
+    if (!ui.mdOpen) return h + '</div>';
+    h += '<p class="sub">適用鮮食櫃、熱食台裡當日報廢的商品。</p><div class="seg" role="group" aria-label="折數">';
+    D.MARKDOWN.pcts.forEach(function (p) { h += '<button class="' + (m.pct === p ? 'on' : '') + '" data-act="md" data-k="pct" data-v="' + p + '">' + (p ? zhe(p) : '不打折') + '</button>'; });
+    h += '</div><div class="seg' + (m.pct ? '' : ' dim') + '" role="group" aria-label="幾點開始打折">';
+    D.MARKDOWN.times.forEach(function (t) { h += '<button class="' + (m.at === t ? 'on' : '') + '" data-act="md" data-k="at" data-v="' + t + '">' + t + ':00 起</button>'; });
+    h += '</div><p class="sub">' + (!m.pct ? '賣不完的鮮食和熱食，清晨會整批報廢。晚上打折賣掉，可以少丟一點。'
+      : on ? '<b class="good">現在打 ' + zhe(m.pct) + '中</b>，直到清晨報廢。今天已經這樣賣出 ' + (S.today.mdUnits || 0) + ' 件。'
+      : '今天 <b>' + m.at + ':00</b> 起打 <b>' + zhe(m.pct) + '</b>，直到清晨報廢。越早開始，原價能賣的時間越短。') +
+      (m.pct >= D.MARKDOWN.habitFrom ? ' 折到 7 折以下，天天這樣客人會學會等晚上再來。' : '') + '</p>' +
+      (habit >= 0.02 ? '<p class="sub"><b class="bad">客人已經習慣等折扣：還沒打折的時段，大約 ' + Math.round(habit * 100) + '% 的人不買了。</b>' + (m.pct >= D.MARKDOWN.habitFrom ? '' : '現在的折數不會再加深，會慢慢恢復。') + '</p>' : '');
+    return h + '</div>';
+  }
   function prodRow(p) {
     const cap = E.cap(S, p.id), st = S.stock[p.id], tg = S.target[p.id], pct = S.price[p.id];
     const y = S.lastReport && S.lastReport.perProd[p.id];
@@ -291,6 +311,9 @@
     const pctTxt = pct === 100 ? '原價' : (pct > 100 ? '貴 ' : '便宜 ') + Math.abs(pct - 100) + '%';
     let foot = y ? '昨天 賣 ' + y.sold + (y.soldOut ? '・<b class="bad">' + y.soldOut + ' 人買不到</b>' : '') + (y.waste ? '・<b class="bad">報廢 ' + y.waste + '</b>' : '') + (y.pricey ? '・' + y.pricey + ' 人嫌貴' : '') : '還沒有銷售紀錄';
     if (S.upgrades.pos && S.prodHist.length) foot += '・<b class="good">建議 ' + E.suggest(S, p.id) + '</b>';
+    if (E.mdApplies(p.id) && E.mdOf(S).pct > 0) {
+      foot = (E.mdActive(S) ? '<b class="good">即期 ' + zhe(E.mdOf(S).pct) + '中，現在賣 $' + E.salePrice(S, p.id) + '</b>' : E.mdOf(S).at + ':00 起 ' + zhe(E.mdOf(S).pct)) + '・' + foot;
+    }
     return '<div class="prod" data-pid="' + p.id + '">' +
       '<div class="prod-top">' + chip(p) + '<b>' + p.name + '</b>' + (p.perish ? '<span class="tag warn">當日報廢</span>' : '') + (S.promo[p.id] > 0 ? '<span class="tag good">進貨 7 折</span>' : '') +
         '<span class="stockn' + (st === 0 ? ' zero' : '') + '">庫存 ' + st + '／' + tg + '</span></div>' +
@@ -342,7 +365,7 @@
   }
   function sheetStock() {
     if (ui.stockCat.indexOf('fx:') === 0 && !E.fixtureCount(S, ui.stockCat.slice(3))) ui.stockCat = 'all';
-    let html = '<div class="card ship" id="stockSum">' + stockSummary() + '</div>';
+    let html = '<div class="card ship" id="stockSum">' + stockSummary() + '</div>' + mdCard();
     html += '<input class="search" id="stockQ" type="search" inputmode="search" enterkeyhint="search" autocomplete="off" placeholder="搜尋商品，例如：茶、飲料、鮮食" aria-label="搜尋商品" data-act="stockSearch" value="' + esc(ui.stockQ) + '">';
     let cats = '<div class="cats" role="group" aria-label="商品分類"><button data-act="stockCat" data-k="all">全部</button><button data-act="stockCat" data-k="out">賣完了</button><button data-act="stockCat" data-k="low">沒補滿</button>';
     D.FIXTURE_ORDER.forEach(function (fx) { if (E.fixtureCount(S, fx)) cats += '<button data-act="stockCat" data-k="fx:' + fx + '">' + D.FIXTURES[fx].name + '</button>'; });
@@ -392,15 +415,25 @@
     const rows = [[0, 1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11]];
     if (ui.moveFrom != null && !S.slots[ui.moveFrom]) ui.moveFrom = null;
     const moving = ui.moveFrom != null;
+    const mvType = moving ? S.slots[ui.moveFrom] : null;
+    let legend = '<div class="card zones"><h4>黃金位置<small>擺對區域，客人有 ' + Math.round(D.GOLD_BONUS * 100) + '% 機會多買一件</small></h4>';
+    D.ZONE_ORDER.forEach(function (z) {
+      legend += '<p><i class="zdot z-' + z + '"></i><b>' + D.ZONES[z].name + '</b>' + D.ZONES[z].fits.map(function (f) { return D.FIXTURES[f].name; }).join('、') + '</p>';
+    });
+    legend += '</div>';
     let html = moving
-      ? '<p class="note"><b>要把' + D.FIXTURES[S.slots[ui.moveFrom]].name + '搬到哪裡？</b>點下面亮起來的位置：空位直接搬過去，已經有設備的位置會互換。搬移不用錢。</p><div class="floor moving">'
+      ? '<p class="note"><b>要把' + D.FIXTURES[mvType].name + '搬到哪裡？</b>點下面亮起來的位置：空位直接搬過去，已經有設備的位置會互換。有 ★ 的是它的黃金位置（' + D.ZONES[E.homeZone(mvType)].name + '）。搬移不用錢。</p><div class="floor moving">'
       : '<p class="note">' + D.LEVELS[S.level].name + '・點一個位置來買、賣或搬設備。同一種設備買第二台，可以放的貨就加倍。</p><div class="floor">';
     rows.forEach(function (row, ri) {
       html += '<div class="floor-row r' + ri + '">';
       row.forEach(function (i) {
         const f = S.slots[i], lock = unlocked.indexOf(i) < 0;
         const cls = moving ? (i === ui.moveFrom ? ' from' : lock ? '' : ' to') : (i === ui.slotSel ? ' on' : '');
-        html += '<button class="slot' + cls + (lock ? ' lock' : f ? ' has' : '') + '" data-act="slot" data-i="' + i + '"' + (moving && !lock && i !== ui.moveFrom ? ' aria-label="搬到這裡：' + (f ? '跟' + D.FIXTURES[f].name + '互換' : '空位') + '"' : '') + '>' + (lock ? '未擴建' : f ? D.FIXTURES[f].name : '空位') + '</button>';
+        const z = E.zoneOf(i);
+        const star = moving ? (!lock && i !== ui.moveFrom && z === E.homeZone(mvType)) : E.isGold(S, i);
+        html += '<button class="slot' + cls + (lock ? ' lock' : f ? ' has' : '') + (star ? ' gold' : '') + '" data-act="slot" data-i="' + i + '"' +
+          ' aria-label="' + D.ZONES[z].name + '：' + (lock ? '未擴建' : f ? D.FIXTURES[f].name + (E.isGold(S, i) ? '（黃金位置）' : '') : '空位') + (moving && !lock && i !== ui.moveFrom ? '。搬到這裡' + (f ? '，跟它互換' : '') + (star ? '（黃金位置）' : '') : '') + '">' +
+          (lock ? '未擴建' : f ? D.FIXTURES[f].name : '空位') + '<small class="z-' + z + '">' + (star ? '★ ' : '') + D.ZONES[z].name + '</small></button>';
       });
       html += '</div>';
     });
@@ -411,19 +444,25 @@
       html += '<div class="card"><p>這個位置要先擴建店面才能使用。</p></div>';
     } else if (f) {
       const fx = D.FIXTURES[f];
-      html += '<div class="card"><h4>' + fx.name + '</h4><p>' + fx.desc + '。每日電費 ' + money(fx.power) + '。</p>' + demandHint(f) +
+      const here = D.ZONES[E.zoneOf(i)].name, home = D.ZONES[E.homeZone(f)];
+      html += '<div class="card"><h4>' + fx.name + (E.isGold(S, i) ? '<span class="tag best">★ 黃金位置</span>' : '') + '</h4><p>' + fx.desc + '。每日電費 ' + money(fx.power) + '。</p>' + demandHint(f) +
+        (E.isGold(S, i)
+          ? '<p class="goldline">擺在「' + here + '」正適合：' + home.why + '，有 ' + Math.round(D.GOLD_BONUS * 100) + '% 機會多買一件。</p>'
+          : '<p class="goldline off">現在擺在「' + here + '」。它的黃金位置是「<b>' + home.name + '</b>」：' + home.why + '，有 ' + Math.round(D.GOLD_BONUS * 100) + '% 機會多買一件。</p>') +
         '<div class="btnrow"><button class="btn primary" data-act="moveFx">搬到別的位置</button><button class="btn" data-act="sellFx">半價賣掉（拿回 ' + money(fx.cost / 2) + '）</button></div></div>';
     } else {
-      html += '<h3 class="grp">這個空位要放什麼？</h3>';
-      D.FIXTURE_ORDER.forEach(function (k) {
+      const zHere = E.zoneOf(i);
+      html += '<h3 class="grp">這個空位要放什麼？<small>這裡是' + D.ZONES[zHere].name + '</small></h3>';
+      // 適合這一區的設備排前面
+      D.FIXTURE_ORDER.slice().sort(function (a, b) { return (E.homeZone(b) === zHere) - (E.homeZone(a) === zHere); }).forEach(function (k) {
         const fx = D.FIXTURES[k];
         const can = S.cash >= fx.cost;
-        html += '<div class="card buy"><div><h4>' + fx.name + (E.fixtureCount(S, k) ? '<span class="tag">已有 ' + E.fixtureCount(S, k) + ' 台</span>' : '') + '</h4><p>' + fx.desc + '</p>' + demandHint(k) + '</div>' +
+        html += '<div class="card buy"><div><h4>' + fx.name + (E.homeZone(k) === zHere ? '<span class="tag best">★ 適合這裡</span>' : '') + (E.fixtureCount(S, k) ? '<span class="tag">已有 ' + E.fixtureCount(S, k) + ' 台</span>' : '') + '</h4><p>' + fx.desc + '</p>' + demandHint(k) + '</div>' +
           '<button class="btn' + (can ? ' primary' : ' off') + '" data-act="buyFx" data-k="' + k + '">' + money(fx.cost) + '</button></div>';
       });
     }
     const next = D.LEVELS[S.level + 1];
-    html += '<h3 class="grp">店面</h3>';
+    html += legend + '<h3 class="grp">店面</h3>';
     if (next) {
       html += '<div class="card buy"><div><h4>擴建成' + next.name + '</h4><p>多 ' + (next.slots - D.LEVELS[S.level].slots) + ' 個設備位置，店租增加一成五。</p></div>' +
         '<button class="btn' + (S.cash >= next.cost ? ' primary' : ' off') + '" data-act="expand">' + money(next.cost) + '</button></div>';
@@ -586,6 +625,10 @@
     const total = Math.max(1, r.customers);
     let tips = '';
     r.tips.forEach(function (t) { tips += '<li>' + esc(t) + '</li>'; });
+    const extras = [];
+    if (r.goldUnits) extras.push('黃金位置多賣 ' + r.goldUnits + ' 件');
+    if (r.mdUnits) extras.push('即期折扣賣出 ' + r.mdUnits + ' 件（' + money(r.mdRev) + '）');
+    if (r.waited) extras.push('<b class="bad">' + r.waited + ' 件被「等晚上折扣」的人放回去</b>');
     let others = '';
     if (ui.lastBg.length) {
       let sum = r.profit;
@@ -603,6 +646,7 @@
       '<div class="kv"><span>來客</span><b>' + r.customers + ' 人</b><span>滿意／不滿</span><b>' + Math.round(r.happy / total * 100) + '%／' + Math.round(r.unhappy / total * 100) + '%</b>' +
       '<span>口碑</span><b>' + r.rep + '</b><span>市佔率</span><b>' + Math.round(r.share * 100) + '%</b>' +
       '<span>清晨到貨</span><b>' + money(r.orderCost) + '</b><span>現金</span><b>' + money(C.wallet(CH)) + '</b></div>' +
+      (extras.length ? '<p class="sub extras">' + extras.join('・') + '</p>' : '') +
       others +
       '<div class="advice"><img class="mascot" alt="" src="' + SC.mascot() + '"><ul>' + tips + '</ul></div>' +
       '<p class="sub">今天 ' + wxChip(S.weather, true) + '　明天預報 ' + wxChip(S.forecast, true) + (S.medal ? '' : '　' + g.txt) + '</p>' +
@@ -725,6 +769,8 @@
       '<li><b>店面下方的長條</b>是今天每小時的人潮：橘色是已經來的客人，藍色是預估，斜紋代表那一班沒人顧店。</li>' +
       '<li><b>進貨：</b>設定每種商品要「補到」幾個、賣多少錢。貨車每天<b>清晨 06:00</b> 送到；等不及可以按「立刻到貨」，馬上上架但多收三成運費。鮮食和報紙賣不完當天就報廢。</li>' +
       '<li><b>設備：</b>買了冷藏櫃才能賣飲料、買了鮮食櫃才能賣便當。看每天結算的建議決定先買什麼。擺好的設備可以免費搬到別的位置或互換。</li>' +
+      '<li><b>黃金位置：</b>冷藏櫃和鮮食櫃靠牆、貨架和書報架放中島、熱食和咖啡擺櫃台旁。擺對了，客人有 ' + Math.round(D.GOLD_BONUS * 100) + '% 機會多買一件，店面上會多一顆星。</li>' +
+      '<li><b>即期品折扣：</b>鮮食和熱食當天賣不完就報廢。可以設定晚上幾點起打幾折；但折到 7 折以下，天天這樣客人會學會等晚上再來。</li>' +
       '<li><b>店員：</b>三個班都要有人，店才會 24 小時營業。</li>' +
       '<li><b>宣傳：</b>口碑和廣告決定你從對手那裡搶到多少客人。</li>' +
       '<li><b>音樂：</b>早班、晚班、大夜各有一首，聽到音樂變了就是換班了。</li>' +
@@ -744,7 +790,7 @@
   }
   const TUTORIAL = [
     '店長好！我是門口那顆門鈴，大家叫我<b>咚咚</b>。從今天起我當你的顧問。',
-    '店裡現在只有一座<b>貨架</b>和一台<b>冷藏櫃</b>。很多客人想買的東西我們還沒賣，每天結算時我會告訴你該添什麼設備。',
+    '店裡現在只有一座<b>貨架</b>和一台<b>冷藏櫃</b>。很多客人想買的東西我們還沒賣，每天結算時我會告訴你該添什麼設備。<br>對了，貨架現在靠牆放，其實它擺在<b>中島</b>會賣得更好——到「設備」可以免費搬。',
     '晚班有工讀生阿明，早班你自己顧，<b>大夜班還沒人</b>——到「店員」請一位，店才會 24 小時開著。',
     '第一個目標是 <b>30 天後</b>的獎牌；最終目標是存到<b>現金 300 萬</b>——到時候可以光榮退休，也可以開分店。準備好了就按「×1」開門營業！',
   ];
@@ -798,6 +844,10 @@
       ui.closedNote = noteKey;
       msg = shiftName + '沒人顧店，客人看到「準備中」就走了……到「店員」排個班吧。';
     }
+    const mdNow = E.mdOf(S);
+    if (!res.dayEnded && mdNow.pct > 0 && S.t === mdNow.at - 6 && D.MARKDOWN.fixtures.some(function (f) { return E.fixtureCount(S, f) > 0; })) {
+      msg = (msg ? msg + ' ' : mdNow.at + ':00 了，') + '鮮食和熱食開始打 ' + zhe(mdNow.pct) + '。';
+    }
     if (!msg && !res.dayEnded) {
       const out = D.PRODUCTS.filter(function (p) { return before[p.id] > 0 && S.stock[p.id] === 0; });
       if (out.length) msg = out.map(function (p) { return p.name; }).join('、') + '賣光了！';
@@ -840,7 +890,7 @@
     C.sync(CH);
     ui.hoursBy = hours || {};
     ui.lastBg = []; ui.milestone = false; ui.branchMode = false;
-    ui.stockQ = ''; ui.stockCat = 'all';
+    ui.stockQ = ''; ui.stockCat = 'all'; ui.mdOpen = false;
     ui.speed = speed === 2 ? 2 : 1;
     ui.paused = true;
     ui.sheet = null;
@@ -1026,6 +1076,11 @@
         return;
       }
       ui.slotSel = i; AU.click(); renderSheet(true);
+    },
+    mdToggle: function () { ui.mdOpen = !ui.mdOpen; AU.click(); renderSheet(true); },
+    md: function (el) {
+      const m = E.mdOf(S), k = el.getAttribute('data-k'), v = +el.getAttribute('data-v');
+      afterAction(E.setMarkdown(S, k === 'at' ? v : m.at, k === 'pct' ? v : m.pct));
     },
     moveFx: function () { if (S.slots[ui.slotSel]) { ui.moveFrom = ui.slotSel; AU.click(); renderSheet(true); } },
     moveCancel: function () { ui.moveFrom = null; AU.click(); renderSheet(true); },

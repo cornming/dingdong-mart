@@ -1,4 +1,5 @@
 /* 平衡驗證：用三種機器人玩家跑完整個 30 天劇本，檢查數值是否落在設計範圍內。
+ * 「用心」的機器人會把設備擺到黃金位置、晚上八點起把即期品打 8 折；「新手」和「放置」不會。
  * 用法：node scripts/balance.js [--seeds 20] [--verbose]
  * 這是 loop engineering 的「驗證閘門」之一：任何數值調整後都要通過。 */
 'use strict';
@@ -10,6 +11,21 @@ const SEEDS = +(args[args.indexOf('--seeds') + 1] || 20) || 20;
 const VERBOSE = args.includes('--verbose');
 
 function freeSlot(s) { return E.unlockedSlots(s).find((i) => !s.slots[i]); }
+// 優先找「適合這種設備的區」裡的空位，沒有才隨便找一個空位
+function slotFor(s, type) {
+  const free = E.unlockedSlots(s).filter((i) => !s.slots[i]);
+  const gold = free.find((i) => E.zoneOf(i) === E.homeZone(type));
+  return gold != null ? gold : free[0];
+}
+// 把沒擺對的設備搬到適合的區（那一區有空位才搬）
+function tidy(s) {
+  for (let i = 0; i < s.slots.length; i++) {
+    const f = s.slots[i];
+    if (!f || E.isGold(s, i)) continue;
+    const to = E.unlockedSlots(s).find((j) => !s.slots[j] && E.zoneOf(j) === E.homeZone(f));
+    if (to != null) E.moveFixture(s, i, to);
+  }
+}
 
 const bots = {
   idle() {},
@@ -22,9 +38,12 @@ const bots = {
     D.PRODUCTS.forEach((p) => E.setTarget(s, p.id, E.cap(s, p.id)));
     E.hire(s, 0, 2);
   },
-  // 用心的玩家：依昨日銷量調進貨（會看週末）、看缺什麼買設備、把班排滿、適度宣傳
+  // 用心的玩家：依昨日銷量調進貨（會看週末）、看缺什麼買設備、把班排滿、適度宣傳；
+  // 設備會擺到適合的區，鮮食與熱食晚上八點起打 8 折
   smart(s) {
     if (s.t !== 0) return;
+    tidy(s);
+    if (E.mdOf(s).pct === 0 && (E.fixtureCount(s, 'fresh') || E.fixtureCount(s, 'hot'))) E.setMarkdown(s, 20, 20);
     const r = s.lastReport;
     const loc = E.LOC[s.locId];
     const bestCand = () => {
@@ -70,11 +89,11 @@ const bots = {
       if (roi > bestRoi) { bestRoi = roi; bestFx = fx; }
     });
     if (bestFx && s.cash > D.FIXTURES[bestFx].cost + 30000) {
-      let slot = freeSlot(s);
+      let slot = slotFor(s, bestFx);
       const next = D.LEVELS[s.level + 1];
       if (slot == null && next && s.cash > next.cost + D.FIXTURES[bestFx].cost + 40000 && bestRoi > next.cost) {
         E.expand(s);
-        slot = freeSlot(s);
+        slot = slotFor(s, bestFx);
       }
       if (slot != null) E.buyFixture(s, slot, bestFx);
     }

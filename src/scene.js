@@ -331,6 +331,31 @@
         });
       }
     }
+    /* 設備上的小標記：黃金位置的星星、即期品折扣的黃色貼紙 */
+    function star(cx, cy, r, c) {
+      ctx.beginPath();
+      for (let n = 0; n < 10; n++) {
+        const a = -Math.PI / 2 + n * Math.PI / 5, rr = n % 2 ? r * 0.45 : r;
+        ctx[n ? 'lineTo' : 'moveTo'](cx + Math.cos(a) * rr, cy + Math.sin(a) * rr);
+      }
+      ctx.closePath(); ctx.fillStyle = c; ctx.fill();
+    }
+    function badges(type, i, x, y) {
+      if (E.isGold(state, i)) {
+        P.circ(x + 28.6, y + 2.2, 3.5, C.white);
+        ctx.beginPath(); ctx.arc(x + 28.6, y + 2.2, 3.5, 0, 6.2832); ctx.strokeStyle = '#E0A800'; ctx.lineWidth = 0.5; ctx.stroke();
+        star(x + 28.6, y + 2.3, 2.7, '#F5B301');
+      }
+      if (D.MARKDOWN.fixtures.indexOf(type) >= 0 && E.mdActive(state, Math.min(state.t, 23))) {
+        const label = (10 - E.mdOf(state).pct / 10) + '折';
+        ctx.save();
+        ctx.translate(x + 9, y + 20.5); ctx.rotate(-0.14);
+        P.rr(-7.2, -3.6, 14.4, 7.2, 1.6, 'rgba(22,32,42,.18)');
+        P.rr(-7.6, -4.1, 14.4, 7.2, 1.6, C.yellow, C.red, 0.5);
+        P.text(label, -0.4, -0.3, 5.2, C.red);
+        ctx.restore();
+      }
+    }
     function emptySlot(x, y, locked, t) {
       if (locked) {
         ctx.setLineDash([2, 2]);
@@ -542,7 +567,7 @@
         const x = pos[0] * T, y = pos[1] * T - 6;
         items.push({ y: pos[1] * T + 16, draw: function () {
           const type = state.slots[i];
-          if (type) fixture(type, x, y, fxFill(type), now + i * 130);
+          if (type) { fixture(type, x, y, fxFill(type), now + i * 130); badges(type, i, x, y); }
           else emptySlot(x, y, unlocked.indexOf(i) < 0, now);
         } });
       });

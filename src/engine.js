@@ -14,6 +14,14 @@
     CURVE[k] = D.CURVES[k].map(function (v) { return v / sum; });
   });
 
+  const ZONE_OF = {};   // 格子 → 區
+  const HOME = {};      // 設備種類 → 最適合的區
+  D.ZONE_ORDER.forEach(function (z) {
+    D.ZONES[z].slots.forEach(function (i) { ZONE_OF[i] = z; });
+    D.ZONES[z].fits.forEach(function (f) { HOME[f] = z; });
+  });
+  const MD = D.MARKDOWN;
+
   const OWNER = { speed: 55, charm: 0.6 };
   const TEMP = { speed: 40, charm: 0.3 };
   const OVERDRAFT = -100000;
@@ -92,6 +100,30 @@
   function unitPrice(s, pid) {
     return Math.max(1, Math.round(P[pid].price * s.price[pid] / 100 * (s.priceCut > 0 ? 0.9 : 1)));
   }
+  /* ----- 黃金陳列 ----- */
+  function zoneOf(slot) { return ZONE_OF[slot] || null; }
+  function homeZone(type) { return HOME[type] || null; }
+  function isGold(s, slot) { const t = s.slots[slot]; return !!t && ZONE_OF[slot] === HOME[t]; }
+  /** 這種設備有幾成擺在黃金位置（0～1）。同一種買兩台、只有一台擺對，就是 0.5。 */
+  function goldShare(s, type) {
+    let n = 0, g = 0;
+    for (let i = 0; i < s.slots.length; i++) if (s.slots[i] === type) { n++; if (ZONE_OF[i] === HOME[type]) g++; }
+    return n ? g / n : 0;
+  }
+
+  /* ----- 即期品折扣 ----- */
+  function mdOf(s) { return s.md || { at: 20, pct: 0 }; }
+  function mdApplies(pid) { return !!P[pid].perish && MD.fixtures.indexOf(P[pid].fx) >= 0; }
+  /** 第 t 個小時（預設現在）即期品有沒有在打折。一天從 06:00 開始，所以 20:00 是第 14 個小時。 */
+  function mdActive(s, t) {
+    const m = mdOf(s);
+    return m.pct > 0 && (t == null ? s.t : t) >= m.at - 6;
+  }
+  /** 現在這個小時實際的售價（即期品打折時段會比 unitPrice 低）。 */
+  function salePrice(s, pid, t) {
+    const base = unitPrice(s, pid);
+    return mdApplies(pid) && mdActive(s, t) ? Math.max(1, Math.round(base * (1 - mdOf(s).pct / 100))) : base;
+  }
   function unitCost(s, pid) {
     return Math.max(1, Math.round(P[pid].cost * (s.promo[pid] > 0 ? 0.7 : 1)));
   }
@@ -168,7 +200,8 @@
   /* ---------- 新遊戲 ---------- */
   function newDayStats() {
     return { rev: 0, service: 0, cogs: 0, waste: 0, theft: 0, wages: 0, rent: 0, power: 0, ads: 0, other: 0,
-      customers: 0, served: 0, happy: 0, neutral: 0, unhappy: 0, queueLost: 0, queueBy: [0, 0, 0], closedLost: 0, perProd: {} };
+      customers: 0, served: 0, happy: 0, neutral: 0, unhappy: 0, queueLost: 0, queueBy: [0, 0, 0], closedLost: 0, perProd: {},
+      goldUnits: 0, mdUnits: 0, mdRev: 0, waited: 0 };
   }
   function pp(td, pid) {
     return td.perProd[pid] || (td.perProd[pid] = { sold: 0, soldOut: 0, noSell: 0, pricey: 0, waste: 0, outAt: -1 });
@@ -204,7 +237,7 @@
       slots: [null, null, null, null, null, null, null, null, null, null, null, null],
       stock: {}, price: {}, target: {}, promo: {},
       staff: [], nextId: 1, owner: { shift: 0 }, cands: [],
-      upgrades: {}, ads: {}, cat: false,
+      upgrades: {}, ads: {}, cat: false, md: { at: 20, pct: 0 }, mdHabit: 0,
       rivals: loc.rivals.map(function (r) { return { name: r.name, str: r.str, sale: 0 }; }), streak: 0,
       weather: 'sunny', nextWeather: null, forecast: null,
       boosts: [], priceCut: 0, guard: 0, closedToday: false, temp: [false, false, false],
@@ -543,6 +576,11 @@
       const segW = [];
       let segTotal = 0;
       const wantW = {}, wantTotal = {};
+      const mdOn = mdActive(s);                       // 這個小時即期品有沒有在打折
+      const mdPct = mdOn ? mdOf(s).pct / 100 : 0;
+      const habit = mdOn ? 0 : (s.mdHabit || 0);      // 還沒打折的時段，有多少人選擇「等晚上再買」
+      const goldP = {};                               // 各種設備「多買一件」的機率
+      D.FIXTURE_ORDER.forEach(function (f) { goldP[f] = D.GOLD_BONUS * goldShare(s, f); });
       SEG_KEYS.forEach(function (k) {
         const w = (loc.mix[k] || 0) * CURVE[k][clock];
         if (w <= 0) return;
@@ -558,6 +596,7 @@
             if (p.wx[s.weather] != null) x *= p.wx[s.weather];
             if (eve && p.wx.eve != null) x *= p.wx.eve;
           }
+          if (mdOn && mdApplies(p.id)) x *= 1 + MD.pull * mdPct;
           arr.push([p.id, x]);
           tot += x;
         });
@@ -573,7 +612,7 @@
         const k = rint(s, seg.wants[0], seg.wants[1]);
         const basket = [];
         const fxWanted = [];
-        let soldOut = 0, pricey = 0, noSell = 0, cheap = 0;
+        let soldOut = 0, pricey = 0, noSell = 0, cheap = 0, got = 0, goldN = 0;
         for (let j = 0; j < k; j++) {
           const pid = weighted(s, wantW[sk], wantTotal[sk]);
           const rec = pp(td, pid);
@@ -581,12 +620,22 @@
           if (c === 0 || (s.target[pid] === 0 && s.stock[pid] === 0)) { noSell++; rec.noSell++; continue; }
           if (fxWanted.length < 2 && fxWanted.indexOf(P[pid].fx) < 0) fxWanted.push(P[pid].fx);
           if (s.stock[pid] <= 0) { soldOut++; rec.soldOut++; continue; }
-          const price = unitPrice(s, pid);
+          const isMd = mdApplies(pid);
+          if (habit > 0 && isMd && rnd(s) < habit) { td.waited++; continue; }   // 等晚上的折扣，現在先不買
+          const price = salePrice(s, pid);
           const ratio = price / P[pid].price;
           if (ratio > 1 && rnd(s) > clamp(1 - seg.sens * (ratio - 1) * 2.5, 0.05, 1)) { pricey++; rec.pricey++; continue; }
           if (ratio < 0.97) cheap++;
           s.stock[pid]--;
           basket.push(pid);
+          got++;
+          // 多買一件：設備擺在黃金位置，或即期品正在打折
+          const pg = goldP[P[pid].fx] || 0;
+          const px = pg + (mdOn && isMd ? MD.extra * mdPct : 0);
+          if (px > 0 && s.stock[pid] > 0) {
+            const roll = rnd(s);
+            if (roll < px) { s.stock[pid]--; basket.push(pid); if (roll < pg) goldN++; }
+          }
         }
         let queue = false, spent = 0;
         if (basket.length) {
@@ -600,14 +649,16 @@
             basket.forEach(function (pid) {
               const rec = pp(td, pid);
               rec.sold++;
-              const price = unitPrice(s, pid);
+              const price = salePrice(s, pid);
               td.rev += price; s.cash += price; td.cogs += P[pid].cost; spent += price;
+              if (mdOn && mdApplies(pid)) { td.mdUnits++; td.mdRev += price; }
               if (s.stock[pid] === 0 && rec.outAt < 0) rec.outAt = clock;
             });
+            td.goldUnits += goldN;
             if (s.upgrades.service && rnd(s) < 0.2) { td.service += 8; s.cash += 8; }
           }
         }
-        let score = queue ? -3 : basket.length - soldOut * 1.5 - pricey - noSell * 0.3;
+        let score = queue ? -3 : got - soldOut * 1.5 - pricey - noSell * 0.3;
         if (!queue && basket.length) {
           score += charm * 0.6;
           if (cheap) score += 0.3;
@@ -690,13 +741,27 @@
         tips.push({ p: rec.soldOut * (p.price - p.cost) / 10, text: p.name + (rec.outAt >= 0 ? ' ' + rec.outAt + ' 點就賣完了' : '缺貨') + '，有 ' + rec.soldOut + ' 人買不到。' +
           (full ? '已經放滿了，再買一台' + D.FIXTURES[p.fx].name + '才放得下。' : '把進貨目標調高吧。') });
       }
-      if (rec.waste >= 10 && rec.waste > rec.sold * 0.25) tips.push({ p: rec.waste * p.cost / 10, text: p.name + '報廢了 ' + rec.waste + ' 個，白白丟掉 ' + money(rec.waste * p.cost) + '。進貨目標調低一點。' });
+      if (rec.waste >= 10 && rec.waste > rec.sold * 0.25) tips.push({ p: rec.waste * p.cost / 10, text: p.name + '報廢了 ' + rec.waste + ' 個，白白丟掉 ' + money(rec.waste * p.cost) + '。進貨目標調低一點' +
+        (mdApplies(p.id) && mdOf(s).pct === 0 ? '，或到「進貨」開「即期品折扣」，晚上打折賣掉總比清晨丟掉好。' : '。') });
       if (rec.pricey >= 12 && rec.pricey > rec.sold * 0.3) tips.push({ p: rec.pricey / 2, text: '有 ' + rec.pricey + ' 位客人嫌' + p.name + '太貴，放回架上就走了。' });
     });
+    // 下面兩種提醒一定會出現（不跟其他建議比優先順序）：一個是玩家自己的設定正在傷生意，一個是不用花錢就能改善
+    const always = [];
+    if ((s.mdHabit || 0) >= 0.06) always.push({ text: '客人學會等晚上的折扣了，今天白天有 ' + td.waited + ' 件鮮食、熱食沒人買。即期品折扣改成 8 折以內，他們會慢慢改回來。' });
+    // 黃金陳列：有設備沒擺對，而且適合它的區剛好有空位
+    const free = unlockedSlots(s).filter(function (i) { return !s.slots[i]; });
+    for (let i = 0; i < s.slots.length; i++) {
+      const f = s.slots[i];
+      if (!f || isGold(s, i)) continue;
+      if (free.some(function (j) { return ZONE_OF[j] === HOME[f]; })) {
+        always.push({ text: D.FIXTURES[f].name + '現在擺在' + D.ZONES[ZONE_OF[i]].name + '，它比較適合「' + D.ZONES[HOME[f]].name + '」。到「設備」免費搬過去，客人有 ' + Math.round(D.GOLD_BONUS * 100) + '% 機會多買一件。' });
+        break;
+      }
+    }
     if (s.clean < 45) tips.push({ p: 30, text: '店裡有點髒亂（整潔度 ' + Math.round(s.clean) + '）。店員越多、掃得越勤，客人和稽查員都看在眼裡。' });
     if (r.profit < 0 && !tips.length) tips.push({ p: 5, text: '今天賠錢了。看看是租金壓力大，還是商品種類太少、客人買不到東西。' });
     tips.sort(function (a, b) { return b.p - a.p; });
-    const out = tips.slice(0, 3).map(function (x) { return x.text; });
+    const out = tips.slice(0, 3 - always.length).concat(always).map(function (x) { return x.text; });
     const fc = s.forecast;
     const fcTip = { hot: '明天預報酷暑，飲料和冰品會大賣。', rainy: '明天預報下雨，雨傘和熱食會好賣，人潮略少。', cold: '明天寒流來襲，關東煮、泡麵、咖啡要多備。',
       typhoon: '颱風警報！今天大家會搶購泡麵和衛生紙，明天路上幾乎沒人。' }[fc];
@@ -734,6 +799,7 @@
       customers: td.customers, served: td.served, happy: td.happy, neutral: td.neutral, unhappy: td.unhappy,
       queueLost: td.queueLost, queueBy: td.queueBy, closedLost: td.closedLost, perProd: td.perProd,
       rep: Math.round(s.rep), share: share(s), orderCost: 0, worth: 0, tips: [], goal: null, rivalClosed: null,
+      goldUnits: td.goldUnits, mdUnits: td.mdUnits, mdRev: td.mdRev, waited: td.waited,
     };
 
     // 換日
@@ -748,6 +814,11 @@
       r.str = Math.min(90, r.str + city.rivalGrow * (0.5 + rnd(s)));
     });
     s.staff.forEach(function (m) { m.sick = false; });
+    // 客人等折扣的習慣：折到 7 折以下會慢慢養成，折淺一點或不折就慢慢改回來
+    const mdCfg = mdOf(s);
+    const habitGoal = mdCfg.pct >= MD.habitFrom ? (mdCfg.pct - (MD.habitFrom - 10)) / 100 : 0;
+    s.mdHabit = (s.mdHabit || 0) + (habitGoal - (s.mdHabit || 0)) * MD.habitRate;
+    if (s.mdHabit < 0.005) s.mdHabit = 0;
     s.temp = [false, false, false];
     s.closedToday = false;
 
@@ -860,6 +931,14 @@
     s.slots[from] = other || null;
     return ok(other ? D.FIXTURES[type].name + '和' + D.FIXTURES[other].name + '換了位置。' : D.FIXTURES[type].name + '搬好了。');
   }
+  /** 即期品折扣：at = 幾點開始（16／18／20／22），pct = 折掉幾成（0 = 不打折、20 = 8 折）。 */
+  function setMarkdown(s, at, pct) {
+    if (MD.times.indexOf(at) < 0) return no('沒有這個時段');
+    if (MD.pcts.indexOf(pct) < 0) return no('沒有這個折數');
+    s.md = { at: at, pct: pct };
+    if (!pct) return ok('即期品不打折。');
+    return ok(at + ':00 起，鮮食和熱食打 ' + (10 - pct / 10) + ' 折。' + (pct >= MD.habitFrom ? '折這麼多，天天這樣客人會學會等晚上再來。' : ''));
+  }
   function setTarget(s, pid, n) {
     if (!P[pid]) return no('沒有這項商品');
     s.target[pid] = clamp(Math.round(n), 0, cap(s, pid));
@@ -954,6 +1033,8 @@
     carriedList: carriedList, attract: attract, share: share, shares: shares, rentOf: rentOf, powerOf: powerOf,
     crewOn: crewOn, isOpen: isOpen, staffOnShift: staffOnShift, netWorth: netWorth, inventoryValue: inventoryValue,
     suggest: suggest, rushCost: rushCost, lambdaAt: lambdaAt, money: money,
+    zoneOf: zoneOf, homeZone: homeZone, isGold: isGold, goldShare: goldShare,
+    mdOf: mdOf, mdApplies: mdApplies, mdActive: mdActive, salePrice: salePrice, setMarkdown: setMarkdown,
     buyFixture: buyFixture, sellFixture: sellFixture, moveFixture: moveFixture, setTarget: setTarget, setPrice: setPrice, rushOrder: rushOrder,
     applySuggestions: applySuggestions, hire: hire, fireStaff: fireStaff, setShift: setShift, setOwnerShift: setOwnerShift,
     buyUpgrade: buyUpgrade, expand: expand, runAd: runAd,

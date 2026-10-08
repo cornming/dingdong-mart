@@ -78,11 +78,11 @@
 
   // goals = 第 30 天結束時的總資產目標（銅、銀、金），數值由 scripts/balance.js 校正
   const CITIES = {
-    kaohsiung: { name: '高雄', level: '輕鬆', cash: 300000, days: 30, goals: [480000, 600000, 740000], rivalGrow: 0.25,
+    kaohsiung: { name: '高雄', level: '輕鬆', cash: 300000, days: 30, goals: [500000, 630000, 780000], rivalGrow: 0.25,
       blurb: '租金便宜、對手少，適合第一次當店長。' },
-    taichung:  { name: '台中', level: '普通', cash: 300000, days: 30, goals: [440000, 540000, 660000], rivalGrow: 0.4,
+    taichung:  { name: '台中', level: '普通', cash: 300000, days: 30, goals: [460000, 570000, 700000], rivalGrow: 0.4,
       blurb: '商圈熱鬧，但已經有同業虎視眈眈。' },
-    taipei:    { name: '台北', level: '困難', cash: 350000, days: 30, goals: [440000, 520000, 640000], rivalGrow: 0.55,
+    taipei:    { name: '台北', level: '困難', cash: 350000, days: 30, goals: [450000, 540000, 665000], rivalGrow: 0.55,
       blurb: '人潮滿滿、租金嚇人，強敵環伺的一級戰區。' },
   };
   const CITY_ORDER = ['kaohsiung', 'taichung', 'taipei'];
@@ -164,6 +164,21 @@
   // 設備格解鎖順序（格子編號對應 ui 的店面配置）
   const SLOT_ORDER = [0, 1, 2, 3, 5, 6, 4, 7, 8, 9, 10, 11];
 
+  // 黃金陳列：店面分成三區，每種設備有一個最適合的區。擺對了，客人拿那台設備的商品時有 GOLD_BONUS 的機會多買一件。
+  const ZONES = {
+    wall:    { name: '靠牆',   slots: [0, 1, 2, 3, 4],   fits: ['fridge', 'fresh'],          why: '客人為了飲料和鮮食，會一路走到最裡面' },
+    island:  { name: '中島',   slots: [6, 7, 8, 10, 11], fits: ['shelf', 'rack', 'freezer'], why: '在走道中間，逛的時候順手拿' },
+    counter: { name: '櫃台旁', slots: [5, 9],            fits: ['hot', 'coffee', 'slush'],   why: '結帳的時候順口加點' },
+  };
+  const ZONE_ORDER = ['wall', 'island', 'counter'];
+  const GOLD_BONUS = 0.15;
+
+  // 即期品折扣：鮮食櫃與熱食台裡當日報廢的商品，可以從晚上某個時間起打折，一直到清晨報廢。
+  // at = 幾點開始（24 小時制）；pct = 折掉幾成（20 = 8 折）。
+  // 折到 7 折（含）以下，客人會慢慢學會「等晚上再買」，白天少賣；8 折以內不會。
+  const MARKDOWN = { fixtures: ['fresh', 'hot'], times: [16, 18, 20, 22], pcts: [0, 10, 20, 30, 40, 50],
+    pull: 2, extra: 1.2, habitFrom: 30, habitRate: 0.25 };
+
   const ADS = {
     flyer: { name: '發傳單',   cost: 2000,  days: 3, boost: 8,  rep: 0, desc: '請工讀生在路口發，便宜有效。' },
     radio: { name: '地方電台', cost: 8000,  days: 5, boost: 15, rep: 0, desc: '「叮咚～」的廣告歌洗腦整個商圈。' },
@@ -182,7 +197,7 @@
 
   const WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'];
 
-  const DATA = { SEGMENTS, CURVES, FIXTURES, FIXTURE_ORDER, PRODUCTS, WEATHER, SEASONS, CITIES, CITY_ORDER, LOCATIONS, RIVAL_NAMES,
+  const DATA = { ZONES, ZONE_ORDER, GOLD_BONUS, MARKDOWN, SEGMENTS, CURVES, FIXTURES, FIXTURE_ORDER, PRODUCTS, WEATHER, SEASONS, CITIES, CITY_ORDER, LOCATIONS, RIVAL_NAMES,
     UPGRADES, UPGRADE_ORDER, LEVELS, SLOT_ORDER, ADS, AD_ORDER, SHIFTS, STAFF_NAMES, STAFF_BIOS, WEEKDAYS };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = DATA;
